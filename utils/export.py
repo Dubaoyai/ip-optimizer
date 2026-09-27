@@ -14,11 +14,13 @@ from typing import List, Optional, Sequence
 
 from core.ranking import RankEntry
 from utils.logger import get_logger
+from utils.paths import data_root
 
 logger = get_logger()
 
-# 输出目录（项目根目录下的 output/，不存在会自动创建）
-OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
+# 输出目录：与日志目录同一个根目录（源码运行是项目根目录下的 output/，
+# 打包运行是 exe 旁边的 output/），不存在时由下面的 mkdir 自动创建。
+OUTPUT_DIR = data_root() / "output"
 
 CSV_HEADERS = (
     "排名", "IP", "端口", "TCP延迟(ms)", "HTTP状态",

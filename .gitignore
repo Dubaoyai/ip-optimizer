@@ -17,3 +17,8 @@ output/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# PyInstaller 打包产物（不要提交进仓库，发布时作为 Release 附件上传）
+dist/
+build/
+*.spec

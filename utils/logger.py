@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import logging
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
-# 项目根目录：本文件位于 <项目根>/utils/logger.py，所以上两级目录就是项目根目录。
-# 使用 pathlib 动态计算，避免硬编码绝对路径，Windows / Linux / macOS 都能用。
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from utils.paths import data_root
 
-# 日志目录、输出目录（结果导出等功能留给后续阶段使用）
+# 运行时数据根目录：源码运行 = 项目根目录；打包后 = exe 所在目录
+# （exe 放到不可写目录时会自动回退到用户目录，具体策略见 utils/paths.py）。
+# 统一由 utils.paths 计算，保证日志目录与导出目录始终指向同一个根。
+PROJECT_ROOT = data_root()
+
+# 日志目录、输出目录
 LOG_DIR = PROJECT_ROOT / "logs"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
