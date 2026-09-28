@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # 回退目录使用的子目录名（英文，避免部分环境读取中文路径出问题）
-FALLBACK_DIR_NAME = "DeepSeekIPOptimizer"
+FALLBACK_DIR_NAME = "IPOptimizer"
 
 # 缓存解析结果，避免重复探测文件系统
 _resolved_root: Path | None = None

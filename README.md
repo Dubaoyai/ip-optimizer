@@ -4,8 +4,8 @@
 
 > ### 📥 不想装 Python？直接下载 exe（免安装）
 >
-> 到 **[Releases 页面](https://github.com/shuma12303/deepseek-ip-optimizer/releases/latest)**
-> 下载 **`DeepSeek-IPOptimizer-V1.4.1.exe`**（约 36 MB，Windows 10 / 11 64 位）。
+> 到 **[Releases 页面](https://github.com/shuma12303/ip-optimizer/releases/latest)**
+> 下载 **`IP-Optimizer-V1.4.2.exe`**（约 36 MB，Windows 10 / 11 64 位）。
 > **双击即用，不需要安装 Python、不需要 `pip install`。**
 > 运行后的日志与导出结果在 **exe 同级**的 `logs\` 与 `output\` 目录里。
 > 完整说明见 [第 16 章 下载可执行文件（免安装版）](#16-下载可执行文件免安装版)。
@@ -425,7 +425,7 @@ HTTPS 下载 /__down?bytes=1048576（10000 ms，统计下载速度）
 ## 8. 项目目录结构
 
 ```text
-deepseek/                      （项目根目录，也就是本文件所在目录）
+ip-optimizer/                   （项目根目录，也就是本文件所在目录）
 │
 ├── main.py                    程序入口：创建日志、启动界面
 ├── run.bat                    双击启动脚本（Windows 便捷入口）
@@ -1112,6 +1112,7 @@ proxy-groups:
 | V1.3 | 2026-09 | 综合评分（下载速度权重最高、延迟越低越好）、IP 排名与 TOP N 截断（10/50/100）、一键复制 TOP IP、TXT / CSV 导出、速度 / 延迟筛选、结果摘要（最快 / 平均速度、最低 / 平均延迟、TOP1） |
 | V1.4 | 2026-09 | 稳定性复测：对 V1.3 TOP IP 多轮重复测试（3/5/10 轮，独立复测并发），统计 TCP / HTTP / 下载成功率与 TCP 延迟、下载速度波动（变异系数），生成稳定性评分、最终评分（V1.3 评分 ×0.9 + 稳定性 ×0.1）与最终排名；稳定 TOP TXT / 稳定性 CSV 导出；复测可随时停止且保留已完成轮次 |
 | V1.4.1 | 2026-09 | **发布修复**（功能与 V1.4 相同）：新增 `utils/paths.py`，使打包成 exe 后日志与导出结果落在 exe 同级目录（原先写进临时目录、退出即丢失）；exe 位于只读目录时自动回退到 `%LOCALAPPDATA%`；新增第 16 章「下载可执行文件」与免安装 exe 发布 |
+| V1.4.2 | 2026-09 | **改名发布**（功能与 V1.4 / V1.4.1 完全相同，未改动任何算法与界面）：程序与发行文件更名，移除旧品牌字样；仓库更名为 `ip-optimizer`，可执行文件更名为 `IP-Optimizer-V1.4.2.exe`，只读目录下的回退数据目录更名为 `%LOCALAPPDATA%\IPOptimizer\`；**旧版 exe 的下载链接同时失效** |
 
 > 已完成版本的功能均已锁定，接口与文件结构保持向后兼容。
 >
@@ -1129,24 +1130,24 @@ proxy-groups:
 
 | 方式 | 适合谁 | 需要装 Python 吗 | 步骤 |
 | --- | --- | --- | --- |
-| **下载 exe（推荐）** | 只想用功能的大多数用户 | **不需要** | 到 [Releases](https://github.com/shuma12303/deepseek-ip-optimizer/releases/latest) 下载 `.exe`，双击 |
+| **下载 exe（推荐）** | 只想用功能的大多数用户 | **不需要** | 到 [Releases](https://github.com/shuma12303/ip-optimizer/releases/latest) 下载 `.exe`，双击 |
 | 源码运行 | 想改代码、审计代码的人 | 需要（3.12+） | 见第 3 章【安装依赖】与第 13.1 节 |
 | 自己打包 | 不信任别人给的 exe 的人 | 需要（3.12+） | 见下面的 16.6 |
 
 ### 16.2 下载与完整性校验
 
-1. 打开 **<https://github.com/shuma12303/deepseek-ip-optimizer/releases/latest>**；
-2. 在 **Assets** 里下载 **`DeepSeek-IPOptimizer-V1.4.1.exe`**（约 36 MB）；
+1. 打开 **<https://github.com/shuma12303/ip-optimizer/releases/latest>**；
+2. 在 **Assets** 里下载 **`IP-Optimizer-V1.4.2.exe`**（约 36 MB）；
 3. （可选）校验文件是否完整、有没有被中途篡改——在 PowerShell 里执行：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\DeepSeek-IPOptimizer-V1.4.1.exe
+Get-FileHash -Algorithm SHA256 .\IP-Optimizer-V1.4.2.exe
 ```
 
 输出的哈希应当等于：
 
 ```text
-9481BECD0916530A548FE2D9B31B528E6F3F00918AF54D2A18CBD5CD8C9564FC
+01746F912810301F95427B9576D5D61A949FB2D246B290A5468368CCEC86FEC7
 ```
 
 对不上就别用（说明下载不完整或文件被动过）。
@@ -1169,7 +1170,7 @@ Windows 对所有未签名程序都会弹这个提示。点过一次【仍要运
 | 要安装吗 | **不用**，绿色单文件，拷到桌面 / U 盘 / 移动硬盘都能直接跑 |
 | 需要管理员权限吗 | **不需要**，普通用户目录即可 |
 | `logs\`、`output\` 在哪 | **exe 同级目录**，第一次启动时自动创建；导出的 TXT/CSV 在 `output\` |
-| 放到 `C:\Program Files\` 打不开 | 这类目录普通用户不可写，程序会**自动改用** `%LOCALAPPDATA%\DeepSeekIPOptimizer\`，日志和导出结果也在那里 |
+| 放到 `C:\Program Files\` 打不开 | 这类目录普通用户不可写，程序会**自动改用** `%LOCALAPPDATA%\IPOptimizer\`，日志和导出结果也在那里 |
 | 双击后 2～5 秒没反应 | 正常：单文件版需要先自解压，等一下就会出窗口 |
 | 卸载 | 直接删除 exe 和 `logs\`、`output\` 即可，不写注册表 |
 
@@ -1186,10 +1187,10 @@ PyInstaller 单文件 exe 会被少数杀软（尤其 360、部分企业终端�
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install pyinstaller
-python -m PyInstaller --noconfirm --onefile --windowed --name DeepSeek-IPOptimizer-V1.4.1 --exclude-module tkinter main.py
+python -m PyInstaller --noconfirm --onefile --windowed --name IP-Optimizer-V1.4.2 --exclude-module tkinter main.py
 ```
 
-打包结果在 `dist\DeepSeek-IPOptimizer-V1.4.1.exe`。
+打包结果在 `dist\IP-Optimizer-V1.4.2.exe`。
 `build\` 目录是中间产物，可以删掉；`dist\`、`build\`、`*.spec` 已被 `.gitignore` 忽略。
 
 ### 16.7 打包版常见问题速查
@@ -1199,10 +1200,10 @@ python -m PyInstaller --noconfirm --onefile --windowed --name DeepSeek-IPOptimiz
 | 双击完全没反应，任务管理器里也没有进程 | 被杀软静默拦截 | 查看杀软隔离区，恢复并加白名单 |
 | 窗口一直不出来 | 首次自解压较慢，或被拦截 | 等 5~10 秒；看 `logs\app.log` 是否有「主窗口创建完成」 |
 | 提示缺少 `python312.dll` | exe 文件不完整（下载中断或被杀软删了片段） | 重新下载并核对 16.2 的哈希值 |
-| 导出成功但找不到文件 | 看导出提示里的路径；若 exe 在只读目录，结果在 `%LOCALAPPDATA%\DeepSeekIPOptimizer\output\` | 到该目录查看，或把 exe 挪到可写目录 |
+| 导出成功但找不到文件 | 看导出提示里的路径；若 exe 在只读目录，结果在 `%LOCALAPPDATA%\IPOptimizer\output\` | 到该目录查看，或把 exe 挪到可写目录 |
 | 在 OneDrive 同步目录里运行卡顿 | 云盘按需下载 + 大量小文件 | 把 exe 移到本地磁盘（如 `D:\ip\`）再运行 |
 
-### 16.8 V1.4.1 与 V1.4 的区别
+### 16.8 V1.4.1 / V1.4.2 与 V1.4 的区别
 
 **功能完全相同**，`V1.4.1` 只解决"打包成 exe 之后"的两个问题：
 
@@ -1212,4 +1213,9 @@ python -m PyInstaller --noconfirm --onefile --windowed --name DeepSeek-IPOptimiz
    避免双击直接崩溃。
 
 源码运行（`python main.py`）的行为与 V1.4 完全一致，不受影响。
+
+**V1.4.2 只是更名版**：程序名、可执行文件名、只读目录下的回退数据目录
+（`%LOCALAPPDATA%\IPOptimizer\`）以及仓库名一并更名，算法、界面、文件格式没有任何改动。
+如果你之前下载过 V1.4.1 的 exe，它仍然可用，只是旧的下载链接已随本次更名下线；
+V1.4.1 在只读目录里生成的旧数据目录不会再被使用，可以手动删除。
 
