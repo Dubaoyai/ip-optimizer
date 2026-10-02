@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from gui import theme, widgets
 from utils.logger import get_logger
 
 logger: logging.Logger = get_logger()
@@ -33,8 +35,9 @@ logger: logging.Logger = get_logger()
 COUNT_CHOICES = (100, 500, 1000, 3000, 5000, 10000)
 DEFAULT_COUNT = 1000
 
-COLOR_OK = QColor(21, 115, 71)     # 绿色：成功
-COLOR_ERROR = QColor(176, 42, 55)  # 红色：失败
+# 状态文字颜色统一取自黑灰主题（gui/theme.py），不写死色值
+COLOR_OK = QColor(theme.GREEN)     # 青绿：成功
+COLOR_ERROR = QColor(theme.RED)    # 红：失败
 
 
 class FetchSettingsDialog(QDialog):
@@ -55,10 +58,15 @@ class FetchSettingsDialog(QDialog):
     # 界面
     # ==================================================================
     def _build_ui(self) -> None:
+        """搭建对话框界面（黑灰主题，V2.0 重排版）。"""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(theme.PAD_H, theme.PAD_V, theme.PAD_H, theme.PAD_V)
+        layout.setSpacing(theme.GAP)
 
         # 1) 设置区
         form = QFormLayout()
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.ip_version_label = QLabel("IPv4（第一阶段只支持 IPv4）")
         self.count_combo = QComboBox()
         for value in COUNT_CHOICES:
@@ -68,17 +76,20 @@ class FetchSettingsDialog(QDialog):
         form.addRow("候选IP数量：", self.count_combo)
         layout.addLayout(form)
 
-        hint = QLabel(
-            "说明：软件会请求 Cloudflare 官方公开 IPv4 网段，\n"
-            "随机生成候选 IP，自动去重并加入当前 IP 列表。\n"
-            "获取完成后不会自动开始测速，需要你手动点击【开始测速】。"
+        hint = widgets.hint_label(
+            "说明：软件会请求 Cloudflare 官方公开 IPv4 网段，随机生成候选 IP，"
+            "自动去重并加入当前 IP 列表。获取完成后不会自动开始测速，需要你手动点击【开始测速】。"
         )
         layout.addWidget(hint)
 
+        layout.addWidget(widgets.Divider())
+
         # 2) 状态区
         self.status_label = QLabel("状态：点击【开始获取】开始")
+        self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
+        # 结果统计：两列网格，比原来一列六行更紧凑
         self.result_labels: dict[str, QLabel] = {}
         result_items = (
             ("source", "IP来源：—"),
@@ -88,24 +99,32 @@ class FetchSettingsDialog(QDialog):
             ("duplicate", "重复IP：—"),
             ("elapsed", "获取耗时：—"),
         )
-        for key, text in result_items:
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        for index, (key, text) in enumerate(result_items):
             label = QLabel(text)
+            label.setObjectName("Secondary")
             self.result_labels[key] = label
-            layout.addWidget(label)
+            grid.addWidget(label, index // 2, index % 2)
+        layout.addLayout(grid)
 
-        # 3) 按钮
+        layout.addStretch(1)
+
+        # 3) 按钮：开始=主按钮，测试=幽灵，关闭=幽灵
         buttons = QHBoxLayout()
-        self.start_button = QPushButton("开始获取")
+        buttons.setSpacing(8)
+        self.start_button = widgets.primary_button("开始获取", "请求 Cloudflare 网段并生成候选 IP")
         self.start_button.clicked.connect(self._on_start)
-        self.test_button = QPushButton("测试Cloudflare连接")
-        self.test_button.setToolTip("只测试 Cloudflare API 是否可以访问，不生成 IP")
+        self.test_button = widgets.ghost_button(
+            "测试Cloudflare连接", "只测试 Cloudflare API 是否可以访问，不生成 IP"
+        )
         self.test_button.clicked.connect(self._on_test)
-        close_button = QPushButton("关闭")
+        close_button = widgets.ghost_button("关闭")
         close_button.clicked.connect(self.reject)
         buttons.addWidget(self.start_button)
         buttons.addWidget(self.test_button)
-        buttons.addWidget(close_button)
         buttons.addStretch(1)
+        buttons.addWidget(close_button)
         layout.addLayout(buttons)
 
     # ==================================================================

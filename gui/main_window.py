@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -63,6 +64,7 @@ from core.scanner import (
 )
 from core.stability import StabilityData  # V1.4：稳定性复测统计数据结构
 from core.tcp_tester import TestResult
+from gui import theme, widgets
 from gui.ip_panel import IPPanel
 from gui.result_table import ResultTable
 from gui.scan_worker import ScanWorker
@@ -146,52 +148,363 @@ class MainWindow(QMainWindow):
         logger.info("软件启动：主窗口创建完成")
 
     # ==================================================================
-    # 界面搭建
+    # 界面搭建（黑灰主题 · 参照《API总代理》视觉语言重排版）
     # ==================================================================
     def _build_ui(self) -> None:
-        central = QWidget()  # V1.4：作为滚动区的子页面（不能提前指定父对象）
-        root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(12, 12, 12, 12)
-        root_layout.setSpacing(10)
+        """搭建主界面：左侧边栏 + 右侧（顶栏 + 统计卡片行 + 滚动内容区）。
 
-        # 顶部标题
-        title_label = QLabel(APP_TITLE)
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root_layout.addWidget(title_label)
+        重排版说明（V2.0 界面重构）：
+        - 原「一列 GroupBox 竖着堆」的布局改为「侧边栏切换视图 + 卡片面板」；
+        - 所有控件的变量名与信号连接与原版**完全一致**，业务逻辑零改动；
+        - 视图切换只是把面板加进/移出布局，控件对象始终存在，数据不丢。
+        """
+        central = QWidget()
+        root = QHBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # IP 来源区域：单独放在 gui/ip_panel.py 里，主窗口只负责接收信号
+        # ---------------- 左侧边栏 ----------------
+        root.addWidget(self._build_sidebar())
+
+        # ---------------- 右侧主区 ----------------
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+
+        right_layout.addWidget(self._build_topbar())
+
+        # 内容滚动区（排版对齐《API总代理》.main：padding 20px 28px 28px 28px）
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._content_host = QWidget()
+        self._content_layout = QVBoxLayout(self._content_host)
+        self._content_layout.setContentsMargins(
+            theme.MAIN_PAD_H, theme.MAIN_PAD_V, theme.MAIN_PAD_H, theme.MAIN_PAD_H
+        )
+        self._content_layout.setSpacing(theme.GAP_CARD)
+        scroll.setWidget(self._content_host)
+        right_layout.addWidget(scroll, 1)
+
+        root.addWidget(right, 1)
+        self.setCentralWidget(central)
+
+        # 构建三个视图的页面容器
+        self._build_stat_cards()
+        self._pages: Dict[str, QWidget] = {}
+        self._pages["workbench"] = self._build_workbench_page()
+        self._pages["results"] = self._build_results_page()
+        self._pages["stability"] = self._build_stability_page()
+
+        # 把三个页面都加进内容区，靠显示/隐藏切换
+        for page in self._pages.values():
+            self._content_layout.addWidget(page)
+        self._content_layout.addStretch(1)
+
+        # 默认显示工作台
+        self._switch_view("workbench")
+        self._set_status("就绪：请先导入 IP")
+
+    # ------------------------------------------------------------------
+    # 左侧边栏
+    # ------------------------------------------------------------------
+    def _build_sidebar(self) -> QWidget:
+        """构建左侧边栏：品牌区 + 导航 + 底部状态。"""
+        side = QWidget()
+        side.setObjectName("Sidebar")
+        side.setFixedWidth(theme.SIDEBAR_WIDTH)
+        layout = QVBoxLayout(side)
+        # 对齐《API总代理》.sidebar：padding 20px 14px
+        layout.setContentsMargins(14, 20, 14, 14)
+        layout.setSpacing(0)
+
+        # ---- 品牌区（对齐《API总代理》.sidebar-brand：padding 0 6px 18px 6px，图标 56×56） ----
+        brand = QWidget()
+        brand.setObjectName("SidebarBrand")
+        brand_layout = QHBoxLayout(brand)
+        brand_layout.setContentsMargins(6, 0, 6, 16)
+        brand_layout.setSpacing(12)
+
+        logo = QLabel("IP")
+        logo.setObjectName("BrandIcon")
+        logo.setFixedSize(theme.BRAND_ICON, theme.BRAND_ICON)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_layout.addWidget(logo)
+
+        text_box = QVBoxLayout()
+        text_box.setSpacing(2)
+        title = QLabel("IP 优选器")
+        title.setObjectName("BrandTitle")
+        sub = QLabel("本地测速 · 优选")
+        sub.setObjectName("BrandSub")
+        text_box.addWidget(title)
+        text_box.addWidget(sub)
+        brand_layout.addLayout(text_box)
+        brand_layout.addStretch(1)
+        layout.addWidget(brand)
+
+        layout.addWidget(widgets.Divider())
+
+        # ---- 导航 ----
+        nav_label = QLabel("功能导航")
+        nav_label.setObjectName("SidebarSection")
+        layout.addWidget(nav_label)
+
+        self._nav_buttons: Dict[str, widgets.NavButton] = {}
+        nav_items = (
+            ("workbench", "工作台", "▶"),
+            ("results", "测试结果", "▤"),
+            ("stability", "稳定性复测", "◈"),
+        )
+        for key, text, icon in nav_items:
+            button = widgets.NavButton(text, icon)
+            button.clicked.connect(lambda _checked=False, k=key: self._switch_view(k))
+            self._nav_buttons[key] = button
+            layout.addWidget(button)
+
+        layout.addStretch(1)
+
+        # ---- 底部状态 ----
+        layout.addWidget(widgets.Divider())
+        self.sidebar_status = QLabel("● 就绪")
+        self.sidebar_status.setObjectName("Muted")
+        self.sidebar_status.setContentsMargins(4, 12, 4, 4)
+        layout.addWidget(self.sidebar_status)
+
+        return side
+
+    def _set_status(self, text: str, tone: str = "") -> None:
+        """统一更新底部状态栏、侧边栏状态与顶栏徽标（三处保持一致）。
+
+        Args:
+            text: 状态文字（如「测速中……」「测速完成」）。
+            tone: 语气 —— muted / success / warning / danger / accent；
+                  留空时按文案关键词自动判定，避免每个调用点都手写语气。
+        """
+        if not tone:
+            tone = self._infer_tone(text)
+        colors = {
+            "muted": theme.TEXT_MUTED,
+            "success": theme.GREEN,
+            "warning": theme.ORANGE,
+            "danger": theme.RED,
+            "accent": theme.ACCENT,
+        }
+        color = colors.get(tone, theme.TEXT_MUTED)
+        if hasattr(self, "sidebar_status"):
+            self.sidebar_status.setText(f"● {text}")
+            self.sidebar_status.setStyleSheet(
+                f"color: {color}; background: transparent; font-size: 12px;"
+            )
+        if hasattr(self, "topbar_status"):
+            self.topbar_status.setText(f"● {text}")
+            self.topbar_status.setStyleSheet(
+                f"color: {color}; background: transparent; font-size: 12px;"
+            )
+        self.statusBar().showMessage(text)
+
+    @staticmethod
+    def _infer_tone(text: str) -> str:
+        """按状态文案的关键词推断语气色（供 _set_status 使用）。
+
+        Args:
+            text: 状态文字。
+
+        Returns:
+            语气标识：danger / accent / warning / success / muted 之一。
+        """
+        if any(k in text for k in ("失败", "错误", "无法")):
+            return "danger"
+        if any(k in text for k in ("正在", "请稍候", "进行中")):
+            return "accent"
+        if any(k in text for k in ("没有可用", "已停止", "无有效")):
+            return "warning"
+        if any(k in text for k in ("完成", "已复制", "已保存", "可以点击")):
+            return "success"
+        return "muted"
+
+    def _switch_view(self, key: str) -> None:
+        """切换右侧显示的功能页面。
+
+        Args:
+            key: 页面标识 —— workbench / results / stability。
+        """
+        if not hasattr(self, "_pages") or key not in self._pages:
+            return
+        for name, page in self._pages.items():
+            page.setVisible(name == key)
+        for name, button in self._nav_buttons.items():
+            button.setChecked(name == key)
+        # 顶栏标题随视图变化
+        titles = {
+            "workbench": ("工作台", "导入候选 IP · 设置测速参数 · 开始测速"),
+            "results": ("测试结果", "按综合评分排名 · 筛选 · 复制与导出"),
+            "stability": ("稳定性复测", "对 TOP IP 多轮复测，取稳定者优先"),
+        }
+        title, subtitle = titles.get(key, ("工作台", ""))
+        self.page_title.setText(title)
+        self.page_subtitle.setText(subtitle)
+        self._active_view = key
+
+    # ------------------------------------------------------------------
+    # 顶栏
+    # ------------------------------------------------------------------
+    def _build_topbar(self) -> QWidget:
+        """构建顶栏：页面标题 + 副标题 + 右侧动作区。"""
+        bar = QWidget()
+        bar.setObjectName("TopBar")
+        bar.setFixedHeight(64)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(20, 10, 20, 10)
+        layout.setSpacing(10)
+
+        text_box = QVBoxLayout()
+        text_box.setSpacing(2)
+        self.page_title = QLabel("工作台")
+        self.page_title.setObjectName("PageTitle")
+        self.page_subtitle = QLabel("导入候选 IP · 设置测速参数 · 开始测速")
+        self.page_subtitle.setObjectName("PageSubtitle")
+        text_box.addWidget(self.page_title)
+        text_box.addWidget(self.page_subtitle)
+        layout.addLayout(text_box)
+        layout.addStretch(1)
+
+        # 右上角常驻的总状态徽标
+        self.topbar_status = QLabel("● 空闲")
+        self.topbar_status.setObjectName("Muted")
+        layout.addWidget(self.topbar_status)
+
+        return bar
+
+    # ------------------------------------------------------------------
+    # 统计卡片行（参照《API总代理》的 stats-grid）
+    # ------------------------------------------------------------------
+    def _build_stat_cards(self) -> None:
+        """构建顶部四张统计卡片：候选 IP / 有效结果 / 最快速度 / 平均延迟。"""
+        self.stat_cards: Dict[str, widgets.StatCard] = {}
+        # 注意：图标必须用**单色 Unicode 符号**（▦ ✓ ◷ ≡ 等）。
+        # 不要用 ⚡ ★ ♥ 这类「会触发 Windows 彩色 emoji 字体」的字符——
+        # 它们会被渲染成彩色字形，无视 QSS 的 color 设置，破坏黑灰主题。
+        cards = (
+            ("ip", "候选 IP", "0", "个", "▦", theme.ACCENT),
+            ("valid", "有效结果", "0", "条", "✓", theme.GREEN),
+            ("speed", "最快速度", "—", "", "≡", theme.ORANGE),
+            ("latency", "平均延迟", "—", "", "◷", theme.BLUE),
+        )
+        self.stat_row = QWidget()
+        row_layout = QHBoxLayout(self.stat_row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(12)
+        for key, label, value, unit, icon, color in cards:
+            card = widgets.StatCard(label, value, unit, icon, color)
+            self.stat_cards[key] = card
+            row_layout.addWidget(card, 1)
+
+    def _refresh_stat_cards(self) -> None:
+        """根据当前数据刷新顶部统计卡片与结果空态提示。"""
+        if not hasattr(self, "stat_cards"):
+            return
+        # 候选 IP：优先取 IP 面板里已导入/生成的数量
+        try:
+            ip_count = len(self.ip_panel.valid_entries)
+        except Exception:
+            ip_count = 0
+        self.stat_cards["ip"].set_value(str(ip_count), theme.ACCENT)
+
+        # 有效结果：当前排名条目数
+        entries = self.result_table.rank_entries
+        valid = [e for e in entries if e.score is not None]
+        self.stat_cards["valid"].set_value(str(len(valid)), theme.GREEN)
+
+        # 最快速度
+        speeds = [e.result.download_speed_bps for e in valid if e.result.download_speed_bps]
+        if speeds:
+            self.stat_cards["speed"].set_value(f"{max(speeds) / 1048576:.2f}", theme.ORANGE)
+        else:
+            self.stat_cards["speed"].set_value("—", theme.TEXT_MUTED)
+
+        # 平均 TCP 延迟
+        latencies = [e.result.latency for e in valid if e.result.latency is not None]
+        if latencies:
+            self.stat_cards["latency"].set_value(f"{sum(latencies) / len(latencies):.0f}", theme.BLUE)
+        else:
+            self.stat_cards["latency"].set_value("—", theme.TEXT_MUTED)
+
+        # 结果空态提示：有结果就收起来
+        if hasattr(self, "result_empty_hint"):
+            self.result_empty_hint.setVisible(not entries)
+
+    # ------------------------------------------------------------------
+    # 页面 1：工作台（IP 来源 + 测速设置 + 测速进度）
+    # ------------------------------------------------------------------
+    def _build_workbench_page(self) -> QWidget:
+        """构建工作台页面：IP 来源面板、测速设置面板、测试进度面板。"""
+        page = QWidget()
+        page.setObjectName("PageContainer")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        layout.addWidget(self.stat_row)
+        layout.addWidget(self._build_ip_panel_card())
+        layout.addWidget(self._build_setting_group())
+        layout.addWidget(self._build_progress_group())
+        return page
+
+    def _build_ip_panel_card(self) -> QWidget:
+        """把 IP 来源面板包进黑灰主题的卡片容器里。"""
+        panel = widgets.Panel("IP 来源", "导入文件 / 粘贴 / 从 Cloudflare 自动获取")
         self.ip_panel = IPPanel()
         self.ip_panel.imported.connect(self._on_ips_imported)
         self.ip_panel.cleared.connect(self._on_ips_cleared)
         self.ip_panel.fetch_completed.connect(self._on_fetch_completed)
         self.ip_panel.fetch_failed.connect(self._on_fetch_failed)
-        root_layout.addWidget(self.ip_panel)
+        # IPPanel 自带 GroupBox 外框，这里去掉它的标题与边框，融进外层卡片
+        self.ip_panel.setTitle("")
+        self.ip_panel.setStyleSheet("QGroupBox { border: none; background: transparent; padding: 0; }")
+        panel.body_layout.addWidget(self.ip_panel)
+        return panel
 
-        root_layout.addWidget(self._build_setting_group())
-        root_layout.addWidget(self._build_progress_group())
-        root_layout.addWidget(self._build_stability_group())      # V1.4：稳定性复测
-        root_layout.addWidget(self._build_result_group(), 1)  # 结果区域占据剩余空间
+    # ------------------------------------------------------------------
+    # 页面 2：测试结果
+    # ------------------------------------------------------------------
+    def _build_results_page(self) -> QWidget:
+        """构建测试结果页面（表格 + 筛选 + 复制导出）。"""
+        page = QWidget()
+        page.setObjectName("PageContainer")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        layout.addWidget(self._build_result_group())
+        return page
 
-        # V1.4：界面内容变多（多了一个复测区），小屏幕上可能放不下，
-        # 用滚动区包裹，窗口再小也能滚动查看，结果表格仍可随窗口拉伸。
-        from PySide6.QtWidgets import QScrollArea
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(central)
-        self.setCentralWidget(scroll)
-        self.statusBar().showMessage("就绪：请先导入 IP")
+    # ------------------------------------------------------------------
+    # 页面 3：稳定性复测
+    # ------------------------------------------------------------------
+    def _build_stability_page(self) -> QWidget:
+        """构建稳定性复测页面。"""
+        page = QWidget()
+        page.setObjectName("PageContainer")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        layout.addWidget(self._build_stability_group())
+        return page
+
 
     def _build_setting_group(self) -> QGroupBox:
-        """测速设置区域（V1.2：新增 HTTP 测试与下载测速的设置）。"""
+        """测速设置区域（V1.2：新增 HTTP 测试与下载测速的设置）。
+
+        V2.0 界面重构：外观改为黑灰主题卡片，控件对象与信号连接保持不变。
+        """
         group = QGroupBox("测速设置")
         layout = QHBoxLayout(group)
+        layout.setSpacing(28)
 
         # ---- 左半部分：第一级 TCP 测试设置（保持第一阶段原样） ----
         tcp_form = QFormLayout()
+        tcp_form.setSpacing(10)
+        tcp_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         self.port_spin.setValue(DEFAULT_PORT)
@@ -209,6 +522,8 @@ class MainWindow(QMainWindow):
 
         # ---- 右半部分：第二级 HTTP + 第三级 下载（V1.2 新增） ----
         stage_form = QFormLayout()
+        stage_form.setSpacing(10)
+        stage_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         # HTTP 测试开关（TCP 成功后才执行）
         self.http_checkbox = QCheckBox("启用 HTTP 测试")
@@ -254,9 +569,12 @@ class MainWindow(QMainWindow):
         layout.addLayout(stage_form)
 
         button_layout = QVBoxLayout()
-        self.start_button = QPushButton("开始测速")
+        button_layout.setSpacing(8)
+        self.start_button = widgets.primary_button("开始测速", "按当前设置开始三级测速")
+        self.start_button.setMinimumHeight(38)
         self.start_button.clicked.connect(self._on_start_scan)
-        self.stop_button = QPushButton("停止测速")
+        self.stop_button = widgets.danger_button("停止测速", "立即停止本轮测速（已完成的结果会保留）")
+        self.stop_button.setMinimumHeight(38)
         self.stop_button.clicked.connect(self._on_stop_scan)
         self.stop_button.setEnabled(False)
         button_layout.addWidget(self.start_button)
@@ -335,8 +653,9 @@ class MainWindow(QMainWindow):
         只在主测速结束且有 V1.3 排名后才允许开始（按钮禁用逻辑见
         _set_running_state / _on_scan_finished）。
         """
-        group = QGroupBox("稳定性复测（对 TOP IP 多次重复测试，取稳定者优先）")
+        group = QGroupBox("复测设置")
         layout = QVBoxLayout(group)
+        layout.setSpacing(12)
 
         # ---- 选项行：复测轮数 + 复测并发 ----
         option_layout = QHBoxLayout()
@@ -366,14 +685,16 @@ class MainWindow(QMainWindow):
         option_layout.addWidget(self.stab_concurrency_combo)
 
         # ---- 开始 / 停止按钮 ----
-        self.stab_start_button = QPushButton("开始复测")
-        self.stab_start_button.setToolTip("对当前 V1.3 排名的 TOP IP 进行多轮复测")
+        self.stab_start_button = widgets.primary_button(
+            "开始复测", "对当前 V1.3 排名的 TOP IP 进行多轮复测"
+        )
         self.stab_start_button.clicked.connect(self._on_stability_start)
         self.stab_start_button.setEnabled(False)  # 主测速结束前不可用
         option_layout.addWidget(self.stab_start_button)
 
-        self.stab_stop_button = QPushButton("停止复测")
-        self.stab_stop_button.setToolTip("停止复测（已完成的轮次结果会保留）")
+        self.stab_stop_button = widgets.danger_button(
+            "停止复测", "停止复测（已完成的轮次结果会保留）"
+        )
         self.stab_stop_button.clicked.connect(self._on_stability_stop)
         self.stab_stop_button.setEnabled(False)  # 复测进行中才可用
         option_layout.addWidget(self.stab_stop_button)
@@ -401,14 +722,17 @@ class MainWindow(QMainWindow):
 
         # ---- 稳定结果导出按钮行 ----
         export_layout = QHBoxLayout()
-        self.export_stable_txt_button = QPushButton("导出稳定TOP TXT")
-        self.export_stable_txt_button.setToolTip("导出最终排名前 100 的 IP（每行一个）到 output\\ 目录")
+        export_layout.setSpacing(8)
+        self.export_stable_txt_button = widgets.ghost_button(
+            "导出稳定TOP TXT", "导出最终排名前 100 的 IP（每行一个）到 output\\ 目录"
+        )
         self.export_stable_txt_button.clicked.connect(self._on_export_stable_txt)
         self.export_stable_txt_button.setEnabled(False)  # 复测完成后才有数据
         export_layout.addWidget(self.export_stable_txt_button)
 
-        self.export_stable_csv_button = QPushButton("导出稳定性CSV")
-        self.export_stable_csv_button.setToolTip("导出稳定性复测的完整统计（含稳定性/最终评分）到 output\\ 目录")
+        self.export_stable_csv_button = widgets.ghost_button(
+            "导出稳定性CSV", "导出稳定性复测的完整统计（含稳定性/最终评分）到 output\\ 目录"
+        )
         self.export_stable_csv_button.clicked.connect(self._on_export_stable_csv)
         self.export_stable_csv_button.setEnabled(False)  # 复测完成后才有数据
         export_layout.addWidget(self.export_stable_csv_button)
@@ -419,9 +743,13 @@ class MainWindow(QMainWindow):
 
 
     def _build_result_group(self) -> QGroupBox:
-        """测试结果区域（V1.3：排名/评分/筛选/复制/导出）。"""
-        group = QGroupBox("测试结果（按综合评分排名：下载速度权重最高，延迟越低越好）")
+        """测试结果区域（V1.3：排名/评分/筛选/复制/导出）。
+
+        V2.0 界面重构：外观改为黑灰主题卡片，控件对象与信号连接保持不变。
+        """
+        group = QGroupBox("排名与筛选")
         layout = QVBoxLayout(group)
+        layout.setSpacing(12)
 
         # ---- V1.3 新增：筛选与 TOP 设置行 ----
         filter_layout = QHBoxLayout()
@@ -460,6 +788,13 @@ class MainWindow(QMainWindow):
         self.result_table = ResultTable()
         layout.addWidget(self.result_table)
 
+        # 空态提示：表格无数据时给出「下一步做什么」，有数据后自动隐藏
+        self.result_empty_hint = widgets.hint_label(
+            "还没有测速结果 —— 请先到「工作台」导入 IP 并点击【开始测速】。", "muted"
+        )
+        self.result_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.result_empty_hint)
+
         # ---- V1.3 新增：复制与导出按钮行 ----
         button_layout = QHBoxLayout()
         self.copy_top10_button = QPushButton("复制TOP10")
@@ -483,7 +818,9 @@ class MainWindow(QMainWindow):
         button_layout.addStretch(1)
         layout.addLayout(button_layout)
 
-        self.result_summary_label = QLabel("暂无结果")
+        self.result_summary_label = QLabel("")
+        self.result_summary_label.setObjectName("Secondary")
+        self.result_summary_label.setWordWrap(True)
         layout.addWidget(self.result_summary_label)
 
         return group
@@ -499,7 +836,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "还没有可复制的 IP，请先完成测速。")
             return
         QApplication.clipboard().setText("\n".join(ips))
-        self.statusBar().showMessage(f"已复制 TOP{len(ips)} 共 {len(ips)} 个 IP 到剪贴板")
+        self._set_status(f"已复制 TOP{len(ips)} 共 {len(ips)} 个 IP 到剪贴板")
         logger.info("用户复制 TOP%s：%s 个 IP", count, len(ips))
 
     def _on_export_txt(self) -> None:
@@ -561,6 +898,7 @@ class MainWindow(QMainWindow):
         self.result_table.set_ranking(entries)
         self.result_table.enable_sorting()
         self._update_summary_text(entries)
+        self._refresh_stat_cards()
         # V1.4：V1.3 排名一旦变化，旧的最终排名与复测汇总即失效
         # （result_table.set_ranking 已清空最终排名快照，这里同步清空复测汇总）
         self._stability_map = {}
@@ -575,7 +913,7 @@ class MainWindow(QMainWindow):
         """刷新结果摘要（含最快/平均速度、最低/平均延迟、TOP1）。"""
         valid = [e for e in entries if e.score is not None]
         if not valid:
-            self.result_summary_label.setText("没有满足条件的有效 IP，可放宽筛选条件后重试")
+            self.result_summary_label.setText("没有满足筛选条件的有效 IP —— 可放宽上方筛选条件后点击【应用筛选】重试。")
             return
         speeds = [e.result.download_speed_bps for e in valid if e.result.download_speed_bps]
         tcp_latencies = [e.result.latency for e in valid if e.result.latency is not None]
@@ -674,7 +1012,7 @@ class MainWindow(QMainWindow):
             "用户点击【开始复测】，目标 %s 个 IP，%s 轮，并发 %s",
             self._stab_ip_total, self._stab_rounds_total, concurrency,
         )
-        self.statusBar().showMessage("稳定性复测进行中……")
+        self._set_status("稳定性复测进行中……")
 
     def _on_stability_stop(self) -> None:
         """请求停止复测（已完成的轮次结果会保留并参与最终排名）。"""
@@ -684,7 +1022,7 @@ class MainWindow(QMainWindow):
         self.stab_start_button.setEnabled(False)
         self.stab_stop_button.setEnabled(False)
         self.stab_status_label.setText("正在停止复测，请稍候……")
-        self.statusBar().showMessage("正在停止复测，请稍候……")
+        self._set_status("正在停止复测，请稍候……")
         logger.info("用户点击了停止复测")
         worker.request_stop()
         # V1.4：线程尚未完全结束就释放 `_stability_worker` 变量，不过 Qt 对象的
@@ -725,6 +1063,7 @@ class MainWindow(QMainWindow):
         self.export_stable_txt_button.setEnabled(has_final)
         self.export_stable_csv_button.setEnabled(has_final)
         self._refresh_stability_summary(stopped, elapsed)
+        self._refresh_stat_cards()
         self._set_stability_running_state(False)
 
         if not self._stability_map or not has_final:
@@ -733,7 +1072,7 @@ class MainWindow(QMainWindow):
                 "复测完成了，但没有拿到可用的复测数据，结果表格保持 V1.3 排名不变。\n\n"
                 "可能原因：网络中断、目标 IP 全部超时，或复测开始前就被停止。",
             )
-            self.statusBar().showMessage("复测结束：无有效结果")
+            self._set_status("复测结束：无有效结果")
             return
         if stopped:
             QMessageBox.information(
@@ -741,14 +1080,14 @@ class MainWindow(QMainWindow):
                 f"复测已停止（用时 {elapsed:.1f} 秒），已用完成的轮次生成最终排名。\n\n"
                 f"{self.stab_summary_label.text()}",
             )
-            self.statusBar().showMessage("复测已停止（已按已完成轮次排名）")
+            self._set_status("复测已停止（已按已完成轮次排名）")
         else:
             QMessageBox.information(
                 self, "复测完成",
                 f"稳定性复测完成，用时 {elapsed:.1f} 秒。\n\n"
                 f"{self.stab_summary_label.text()}",
             )
-            self.statusBar().showMessage("复测完成")
+            self._set_status("复测完成")
         logger.info(
             "复测完成：%s 个 IP 有复测数据，最终排名 %s 条，用时 %.1f 秒，用户停止=%s",
             len(self._stability_map), len(entries), elapsed, stopped,
@@ -760,7 +1099,7 @@ class MainWindow(QMainWindow):
         self.stab_status_label.setText("复测失败，请查看日志")
         logger.error("复测失败：%s", message)
         QMessageBox.critical(self, "复测失败", message)
-        self.statusBar().showMessage("复测失败")
+        self._set_status("复测失败")
 
     def _on_stability_worker_thread_finished(self) -> None:
         """复测线程真正结束后释放对象（复测汇总已由 _on_stability_finished 保存）。"""
@@ -863,19 +1202,20 @@ class MainWindow(QMainWindow):
     def _on_ips_imported(self, outcome) -> None:
         """IP 导入完成（由 IPPanel 通过信号通知）。"""
         self._valid_entries = self.ip_panel.valid_entries
+        self._refresh_stat_cards()
 
         if outcome.summary.valid_count == 0:
-            self.statusBar().showMessage("导入完成：没有可用的公网 IPv4 地址")
+            self._set_status("导入完成：没有可用的公网 IPv4 地址")
             return
-        self.statusBar().showMessage(
+        self._set_status(
             f"导入完成：{outcome.summary.valid_count} 个有效 IP，可以开始测速"
         )
 
     def _on_ips_cleared(self) -> None:
         """用户点击了【清空导入】。"""
         self._valid_entries = []
-        self.result_summary_label.setText("暂无结果")
-        self.statusBar().showMessage("已清空导入内容")
+        self.result_summary_label.setText("")
+        self._set_status("已清空导入内容")
         # V1.4：复测的原始汇总不再有效，但表格快照（V1.3 排名 / 最终排名）
         # 保持显示、导出仍可用，与此前 V1.3 “清空导入不清空结果”的行为一致。
         self._stability_map = {}
@@ -892,11 +1232,12 @@ class MainWindow(QMainWindow):
     def _on_fetch_completed(self, summary_text: str) -> None:
         """自动获取 Cloudflare IP 完成（由 IPPanel 通知）。"""
         self._valid_entries = self.ip_panel.valid_entries
-        self.statusBar().showMessage(f"{summary_text}，可以点击【开始测速】")
+        self._refresh_stat_cards()
+        self._set_status(f"{summary_text}，可以点击【开始测速】")
 
     def _on_fetch_failed(self, message: str) -> None:
         """自动获取 Cloudflare IP 失败。"""
-        self.statusBar().showMessage(f"自动获取失败：{message}")
+        self._set_status(f"自动获取失败：{message}")
 
     # ==================================================================
     # 测速流程
@@ -985,7 +1326,7 @@ class MainWindow(QMainWindow):
             "开启" if http_enabled else "关闭",
             "开启" if download_enabled else "关闭",
         )
-        self.statusBar().showMessage("测速进行中……")
+        self._set_status("测速进行中……")
 
     def _on_stop_scan(self) -> None:
         """请求停止测速。"""
@@ -996,7 +1337,7 @@ class MainWindow(QMainWindow):
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(False)
         self.result_summary_label.setText("正在停止测速，请稍候……")
-        self.statusBar().showMessage("正在停止测速，请稍候……")
+        self._set_status("正在停止测速，请稍候……")
         logger.info("用户点击了停止测速")
         self._worker.request_stop()
 
@@ -1100,7 +1441,7 @@ class MainWindow(QMainWindow):
                 f"HTTP 成功：{summary.http_success}，失败：{summary.http_failed}\n"
                 f"下载成功：{summary.download_success}，失败：{summary.download_failed}",
             )
-            self.statusBar().showMessage("测速已停止")
+            self._set_status("测速已停止")
         else:
             QMessageBox.information(
                 self,
@@ -1111,7 +1452,7 @@ class MainWindow(QMainWindow):
                 f"HTTP 成功：{summary.http_success}，失败：{summary.http_failed}\n"
                 f"下载成功：{summary.download_success}，失败：{summary.download_failed}",
             )
-            self.statusBar().showMessage("测速完成")
+            self._set_status("测速完成")
 
     def _on_scan_failed(self, message: str) -> None:
         """测速线程出错。"""
@@ -1122,7 +1463,7 @@ class MainWindow(QMainWindow):
         self.result_summary_label.setText("测速失败，请查看日志")
         logger.error("测速失败：%s", message)
         QMessageBox.critical(self, "测速失败", message)
-        self.statusBar().showMessage("测速失败")
+        self._set_status("测速失败")
 
     def _on_worker_thread_finished(self) -> None:
         """线程真正结束后释放对象。"""
@@ -1188,7 +1529,7 @@ class MainWindow(QMainWindow):
             if not worker.wait(3000):
                 logger.info("测速线程仍在收尾，窗口先隐藏，结束后自动退出")
                 self.hide()
-                self.statusBar().showMessage("正在停止测速，程序即将自动退出……")
+                self._set_status("正在停止测速，程序即将自动退出……")
                 self._start_quit_timer()
                 event.ignore()
                 return
@@ -1211,7 +1552,7 @@ class MainWindow(QMainWindow):
             if not stab_worker.wait(3000):
                 logger.info("复测线程仍在收尾，窗口先隐藏，结束后自动退出")
                 self.hide()
-                self.statusBar().showMessage("正在停止复测，程序即将自动退出……")
+                self._set_status("正在停止复测，程序即将自动退出……")
                 self._start_quit_timer()
                 event.ignore()
                 return

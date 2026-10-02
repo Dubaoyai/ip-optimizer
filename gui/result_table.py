@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from core.tcp_tester import TestResult
 from core.http_tester import format_speed
 from core.ranking import FinalEntry, RankEntry
+from gui import theme
 from utils.logger import get_logger
 
 logger: logging.Logger = get_logger()
@@ -28,10 +29,11 @@ logger: logging.Logger = get_logger()
 FAST_LATENCY_MS = 80
 SLOW_LATENCY_MS = 200
 
-COLOR_SUCCESS = QColor(21, 115, 71)    # 绿色
-COLOR_WARNING = QColor(198, 120, 0)    # 橙色
-COLOR_FAILED = QColor(176, 42, 55)     # 红色
-COLOR_MUTED = QColor(128, 128, 128)    # 灰色：表示「未测试」
+# 配色统一取自黑灰主题（gui/theme.py），不在本文件写死色值
+COLOR_SUCCESS = theme.COLOR_SUCCESS   # 青绿：优秀
+COLOR_WARNING = theme.COLOR_WARNING   # 橙：一般
+COLOR_FAILED = theme.COLOR_FAILED     # 红：失败
+COLOR_MUTED = theme.COLOR_MUTED       # 灰：表示「未测试」
 
 # 下载速度的颜色阈值（字节/秒）：≥5MB/s 绿色，≥1MB/s 橙色，其余红色
 FAST_SPEED_BPS = 5 * 1024 * 1024
@@ -141,6 +143,18 @@ class ResultTable(QTableWidget):
         self.setWordWrap(False)
         self.verticalHeader().setVisible(False)
         self.setSortingEnabled(False)  # 测速过程中先不排序，避免大量数据反复重排
+
+        # ---- 黑灰主题视觉：行高、表头高度、去掉网格线（改由斑马纹区分行） ----
+        # 颜色与内边距一律由全局主题（gui/theme.py 的 QSS）统一控制，
+        # 本控件只调结构参数，避免样式双真源。
+        self.verticalHeader().setDefaultSectionSize(30)
+        self.horizontalHeader().setFixedHeight(36)
+        self.setShowGrid(False)
+        # 17 列在窄窗口下会互相挤压：给每列一个下限，超出部分改为横向滚动，
+        # 避免出现「末列表头被裁掉半截」的观感问题。
+        self.horizontalHeader().setMinimumSectionSize(56)
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setTextElideMode(Qt.TextElideMode.ElideRight)
 
         header = self.horizontalHeader()
         header.setSectionResizeMode(self.COL_RANK, QHeaderView.ResizeMode.ResizeToContents)

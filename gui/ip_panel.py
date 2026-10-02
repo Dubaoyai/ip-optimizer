@@ -28,10 +28,12 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from core.ip_loader import IPEntry, IPLoaderError
 from core.ip_validator import ImportOutcome, ImportSummary, import_from_file, import_from_text
+from gui import theme, widgets
 from gui.fetch_dialog import DEFAULT_COUNT, FetchSettingsDialog
 from gui.fetch_worker import FetchWorker, TestConnectionWorker
 from utils.logger import get_logger
@@ -75,10 +77,11 @@ class IPPanel(QGroupBox):
 
         # 1) 选择文件
         file_layout = QHBoxLayout()
+        file_layout.setSpacing(8)
         self.file_path_edit = QLineEdit()
         self.file_path_edit.setReadOnly(True)
         self.file_path_edit.setPlaceholderText("未选择文件（支持 TXT，每行一个 IP 或 IP:端口）")
-        self.choose_file_button = QPushButton("选择IP文件")
+        self.choose_file_button = widgets.ghost_button("选择IP文件", "从本地选择一个 IP 列表文件")
         self.choose_file_button.clicked.connect(self._on_choose_file)
         file_layout.addWidget(self.file_path_edit, 1)
         file_layout.addWidget(self.choose_file_button)
@@ -91,19 +94,22 @@ class IPPanel(QGroupBox):
         self.ip_text_edit.setFixedHeight(110)
         layout.addWidget(self.ip_text_edit)
 
-        # 3) 操作按钮
+        # 3) 操作按钮（导入=主按钮，其余=幽灵按钮）
         button_layout = QHBoxLayout()
-        self.import_button = QPushButton("导入IP")
+        button_layout.setSpacing(8)
+        self.import_button = widgets.primary_button("导入IP", "导入已选文件，或下方粘贴的内容")
         self.import_button.clicked.connect(self._on_import_ips)
-        self.clear_button = QPushButton("清空导入")
+        self.clear_button = widgets.ghost_button("清空导入")
         self.clear_button.clicked.connect(self._on_clear_import)
         button_layout.addWidget(self.import_button)
         button_layout.addWidget(self.clear_button)
-        self.auto_button = QPushButton("自动获取IP")
-        self.auto_button.setToolTip("从 Cloudflare 官方公开 IPv4 网段随机生成候选 IP")
+        self.auto_button = widgets.ghost_button(
+            "自动获取IP", "从 Cloudflare 官方公开 IPv4 网段随机生成候选 IP"
+        )
         self.auto_button.clicked.connect(self._on_auto_fetch)
-        self.refresh_button = QPushButton("刷新IP")
-        self.refresh_button.setToolTip("重新获取 Cloudflare 网段并重新随机生成候选 IP")
+        self.refresh_button = widgets.ghost_button(
+            "刷新IP", "重新获取 Cloudflare 网段并重新随机生成候选 IP"
+        )
         self.refresh_button.clicked.connect(self._on_refresh)
         button_layout.addWidget(self.auto_button)
         button_layout.addWidget(self.refresh_button)
@@ -114,9 +120,10 @@ class IPPanel(QGroupBox):
             QLabel("提示：已选择文件时，点击【导入IP】导入文件内容；未选择文件时，导入下面粘贴的内容。")
         )
 
-        # 4) 统计信息
+        # 4) 统计信息（改为「小标签 + 大数字」的卡片式排版，比纯文字行更易扫读）
         self.stat_labels: dict[str, QLabel] = {}
-        stats_layout = QGridLayout()
+        stats_grid = QGridLayout()
+        stats_grid.setSpacing(6)
         stat_items = (
             ("total", "读取数量"),
             ("unique", "去重后数量"),
@@ -126,13 +133,33 @@ class IPPanel(QGroupBox):
             ("invalid", "无效IP"),
         )
         for index, (key, title) in enumerate(stat_items):
-            label = QLabel(f"{title}：0")
-            self.stat_labels[key] = label
-            stats_layout.addWidget(label, index // 3, index % 3)
-        layout.addLayout(stats_layout)
+            # 每项占两列：左边小标签，右边大数字
+            cell = QWidget()
+            cell_layout = QHBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(6)
+
+            name_label = QLabel(f"{title}")
+            name_label.setObjectName("Muted")
+            cell_layout.addWidget(name_label)
+
+            value_label = QLabel("0")
+            # 「有效IP」用青绿强调，其余用主文字色
+            color = theme.GREEN if key == "valid" else theme.TEXT_PRIMARY
+            value_label.setStyleSheet(
+                f"color: {color}; font-size: 15px; font-weight: bold; background: transparent;"
+            )
+            cell_layout.addWidget(value_label)
+            cell_layout.addStretch(1)
+
+            self.stat_labels[key] = value_label
+            stats_grid.addWidget(cell, index // 3, index % 3)
+        layout.addLayout(stats_grid)
 
         # 5) 自动获取状态（获取完成后显示摘要）
         self.fetch_status_label = QLabel("自动获取：尚未使用（点击【自动获取IP】从 Cloudflare 获取）")
+        self.fetch_status_label.setObjectName("Muted")
+        self.fetch_status_label.setWordWrap(True)
         layout.addWidget(self.fetch_status_label)
 
     # ==================================================================
@@ -376,13 +403,13 @@ class IPPanel(QGroupBox):
     # 内部方法
     # ==================================================================
     def _update_statistics(self, summary: ImportSummary) -> None:
-        """刷新统计标签。"""
-        self.stat_labels["total"].setText(f"读取数量：{summary.total_lines}")
-        self.stat_labels["unique"].setText(f"去重后数量：{summary.unique_count}")
-        self.stat_labels["duplicate"].setText(f"重复数量：{summary.duplicate_count}")
-        self.stat_labels["format_error"].setText(f"格式错误：{summary.format_error_count}")
-        self.stat_labels["valid"].setText(f"有效IP：{summary.valid_count}")
-        self.stat_labels["invalid"].setText(f"无效IP：{summary.invalid_count}")
+        """刷新统计数值（标签名固定，这里只更新数字）。"""
+        self.stat_labels["total"].setText(str(summary.total_lines))
+        self.stat_labels["unique"].setText(str(summary.unique_count))
+        self.stat_labels["duplicate"].setText(str(summary.duplicate_count))
+        self.stat_labels["format_error"].setText(str(summary.format_error_count))
+        self.stat_labels["valid"].setText(str(summary.valid_count))
+        self.stat_labels["invalid"].setText(str(summary.invalid_count))
 
     @staticmethod
     def _format_import_message(outcome: ImportOutcome) -> str:
