@@ -62,7 +62,7 @@ class StatCard(QWidget):
         value: str = "0",
         unit: str = "",
         icon_text: str = "",
-        accent_hex: str = theme.TEXT_PRIMARY,
+        accent_key: str = "TEXT_PRIMARY",
         parent: Optional[QWidget] = None,
     ) -> None:
         """初始化统计卡片。
@@ -72,7 +72,7 @@ class StatCard(QWidget):
             value: 指标数值（字符串，便于显示「—」等占位）。
             unit: 数值单位（如「个」，可空）。
             icon_text: 右上角水印图标字符（可空）。
-            accent_hex: 数值颜色（默认主文字色，可传状态色强调）。
+            accent_key: 数值颜色在主题色板中的键名（默认主文字色，可传 GREEN 等状态色）。
             parent: 父控件。
         """
         super().__init__(parent)
@@ -97,11 +97,10 @@ class StatCard(QWidget):
         top.addStretch(1)
         if icon_text:
             icon = QLabel(icon_text)
-            # 对齐《API总代理》.stat-icon：只有约 7% 对比度的极淡水印。
-            # Qt 的 QSS 不支持 opacity，改用极低透明度的前景色实现同样观感；
-            # 颜色**固定为白**，不跟随数值强调色，否则会喧宾夺主。
+            # 图标水印：对齐《API总代理》.stat-icon 的极淡观感。
+            # Qt 的 QSS 不支持 opacity，故色板里用 rgba 半透明色代替。
             icon.setStyleSheet(
-                "color: rgba(245, 245, 245, 30);"
+                f"color: {theme.color('WATERMARK')};"
                 "background: transparent; font-size: 22px;"
             )
             icon.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -111,9 +110,12 @@ class StatCard(QWidget):
         # 下排：大数字 + 单位
         bottom = QHBoxLayout()
         bottom.setSpacing(5)
+        self._accent_key = accent_key
         self._value = QLabel(value)
         self._value.setObjectName("StatValue")
-        self._value.setStyleSheet(f"color: {accent_hex}; background: transparent;")
+        self._value.setStyleSheet(
+            f"color: {theme.color(accent_key)}; background: transparent;"
+        )
         bottom.addWidget(self._value)
         self._unit = QLabel(unit)
         self._unit.setObjectName("StatUnit")
@@ -123,16 +125,28 @@ class StatCard(QWidget):
         outer.addLayout(bottom)
         outer.addStretch(1)
 
-    def set_value(self, value: str, accent_hex: Optional[str] = None) -> None:
+        # 主题切换时按新色板重绘数值颜色与水印
+        theme.on_changed(self._on_theme_changed)
+
+    def _on_theme_changed(self) -> None:
+        """主题切换回调：按当前色板重设数值颜色（保持原有强调键）。"""
+        self._value.setStyleSheet(
+            f"color: {theme.color(self._accent_key)}; background: transparent;"
+        )
+
+    def set_value(self, value: str, accent_key: Optional[str] = None) -> None:
         """更新卡片数值。
 
         Args:
             value: 新的数值文本。
-            accent_hex: 可选的新颜色，不传则保持原色。
+            accent_key: 可选的新强调色键名，不传则保持原色。
         """
         self._value.setText(value)
-        if accent_hex is not None:
-            self._value.setStyleSheet(f"color: {accent_hex}; background: transparent;")
+        if accent_key is not None:
+            self._accent_key = accent_key
+        self._value.setStyleSheet(
+            f"color: {theme.color(self._accent_key)}; background: transparent;"
+        )
 
 
 # ======================================================================
@@ -236,7 +250,14 @@ class Divider(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         # 直接设置内联样式，避免依赖 frameShape 在深色主题下的默认渲染
         self.setStyleSheet(
-            f"background-color: {theme.BORDER}; border: none; max-height: 1px;"
+            f"background-color: {theme.color('BORDER')}; border: none; max-height: 1px;"
+        )
+        theme.on_changed(self._on_theme_changed)
+
+    def _on_theme_changed(self) -> None:
+        """主题切换回调：重设分隔线颜色。"""
+        self.setStyleSheet(
+            f"background-color: {theme.color('BORDER')}; border: none; max-height: 1px;"
         )
 
 

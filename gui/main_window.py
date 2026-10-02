@@ -285,13 +285,13 @@ class MainWindow(QMainWindow):
         if not tone:
             tone = self._infer_tone(text)
         colors = {
-            "muted": theme.TEXT_MUTED,
-            "success": theme.GREEN,
-            "warning": theme.ORANGE,
-            "danger": theme.RED,
-            "accent": theme.ACCENT,
+            "muted": theme.color("TEXT_MUTED"),
+            "success": theme.color("GREEN"),
+            "warning": theme.color("ORANGE"),
+            "danger": theme.color("RED"),
+            "accent": theme.color("ACCENT"),
         }
-        color = colors.get(tone, theme.TEXT_MUTED)
+        color = colors.get(tone, theme.color("TEXT_MUTED"))
         if hasattr(self, "sidebar_status"):
             self.sidebar_status.setText(f"● {text}")
             self.sidebar_status.setStyleSheet(
@@ -370,12 +370,70 @@ class MainWindow(QMainWindow):
         layout.addLayout(text_box)
         layout.addStretch(1)
 
+        # ---- 主题切换器（深色 / 浅色 / 跟随系统） ----
+        self.theme_combo = QComboBox()
+        self.theme_combo.setToolTip("切换界面主题（默认深色，选择会被记住）")
+        self.theme_combo.setMinimumWidth(104)
+        for mode in theme.MODES:
+            self.theme_combo.addItem(theme.MODE_LABELS[mode], mode)
+        # 显示「上次保存的选择」，与 main.py 启动时应用的主题保持一致
+        saved_mode = theme.load_saved_mode()
+        default_index = next(
+            (i for i, m in enumerate(theme.MODES) if m == saved_mode), 0
+        )
+        self.theme_combo.setCurrentIndex(default_index)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_selected)
+        layout.addWidget(self.theme_combo)
+
         # 右上角常驻的总状态徽标
         self.topbar_status = QLabel("● 空闲")
         self.topbar_status.setObjectName("Muted")
         layout.addWidget(self.topbar_status)
 
         return bar
+
+    def _on_theme_selected(self, index: int) -> None:
+        """用户在顶栏切换主题：立即应用并记住选择。
+
+        Args:
+            index: 下拉框当前索引。
+        """
+        mode = self.theme_combo.itemData(index) or theme.DEFAULT_MODE
+        self.apply_theme_mode(mode)
+        self._set_status(f"主题已切换为「{theme.MODE_LABELS.get(mode, mode)}」", "muted")
+
+    def apply_theme_mode(self, mode: str) -> str:
+        """应用指定主题模式，并同步顶栏选择器的显示。
+
+        供界面内切换与外部调用（如启动时恢复上次选择）共用，
+        确保「下拉框显示」与「实际生效主题」始终一致。
+
+        Args:
+            mode: "dark" / "light" / "system"。
+
+        Returns:
+            实际生效的主题（"dark" 或 "light"）。
+        """
+        app = QApplication.instance()
+        effective = mode
+        if app is not None:
+            effective = theme.apply_theme(app, mode)
+            logger.info("应用主题：%s（实际生效 %s）", mode, effective)
+            # 记住用户选择，下次启动沿用
+            theme.save_mode(mode)
+
+        # 同步下拉框显示（blockSignals 避免递归触发）
+        if hasattr(self, "theme_combo"):
+            target = next((i for i, m in enumerate(theme.MODES) if m == mode), 0)
+            if self.theme_combo.currentIndex() != target:
+                self.theme_combo.blockSignals(True)
+                self.theme_combo.setCurrentIndex(target)
+                self.theme_combo.blockSignals(False)
+
+        # 主题切换后刷新表格单元格颜色（表格用 QColor 上色，不随 QSS 自动更新）
+        if hasattr(self, "result_table"):
+            self.result_table.reapply_colors()
+        return effective
 
     # ------------------------------------------------------------------
     # 统计卡片行（参照《API总代理》的 stats-grid）
@@ -385,19 +443,19 @@ class MainWindow(QMainWindow):
         self.stat_cards: Dict[str, widgets.StatCard] = {}
         # 注意：图标必须用**单色 Unicode 符号**（▦ ✓ ◷ ≡ 等）。
         # 不要用 ⚡ ★ ♥ 这类「会触发 Windows 彩色 emoji 字体」的字符——
-        # 它们会被渲染成彩色字形，无视 QSS 的 color 设置，破坏黑灰主题。
+        # 它们会被渲染成彩色字形，无视 QSS 的 color 设置，破坏主题一致性。
         cards = (
-            ("ip", "候选 IP", "0", "个", "▦", theme.ACCENT),
-            ("valid", "有效结果", "0", "条", "✓", theme.GREEN),
-            ("speed", "最快速度", "—", "", "≡", theme.ORANGE),
-            ("latency", "平均延迟", "—", "", "◷", theme.BLUE),
+            ("ip", "候选 IP", "0", "个", "▦", "ACCENT"),
+            ("valid", "有效结果", "0", "条", "✓", "GREEN"),
+            ("speed", "最快速度", "—", "", "≡", "ORANGE"),
+            ("latency", "平均延迟", "—", "", "◷", "BLUE"),
         )
         self.stat_row = QWidget()
         row_layout = QHBoxLayout(self.stat_row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(12)
-        for key, label, value, unit, icon, color in cards:
-            card = widgets.StatCard(label, value, unit, icon, color)
+        for key, label, value, unit, icon, color_key in cards:
+            card = widgets.StatCard(label, value, unit, icon, color_key)
             self.stat_cards[key] = card
             row_layout.addWidget(card, 1)
 
@@ -410,26 +468,26 @@ class MainWindow(QMainWindow):
             ip_count = len(self.ip_panel.valid_entries)
         except Exception:
             ip_count = 0
-        self.stat_cards["ip"].set_value(str(ip_count), theme.ACCENT)
+        self.stat_cards["ip"].set_value(str(ip_count), "ACCENT")
 
         # 有效结果：当前排名条目数
         entries = self.result_table.rank_entries
         valid = [e for e in entries if e.score is not None]
-        self.stat_cards["valid"].set_value(str(len(valid)), theme.GREEN)
+        self.stat_cards["valid"].set_value(str(len(valid)), "GREEN")
 
         # 最快速度
         speeds = [e.result.download_speed_bps for e in valid if e.result.download_speed_bps]
         if speeds:
-            self.stat_cards["speed"].set_value(f"{max(speeds) / 1048576:.2f}", theme.ORANGE)
+            self.stat_cards["speed"].set_value(f"{max(speeds) / 1048576:.2f}", "ORANGE")
         else:
-            self.stat_cards["speed"].set_value("—", theme.TEXT_MUTED)
+            self.stat_cards["speed"].set_value("—", "TEXT_MUTED")
 
         # 平均 TCP 延迟
         latencies = [e.result.latency for e in valid if e.result.latency is not None]
         if latencies:
-            self.stat_cards["latency"].set_value(f"{sum(latencies) / len(latencies):.0f}", theme.BLUE)
+            self.stat_cards["latency"].set_value(f"{sum(latencies) / len(latencies):.0f}", "BLUE")
         else:
-            self.stat_cards["latency"].set_value("—", theme.TEXT_MUTED)
+            self.stat_cards["latency"].set_value("—", "TEXT_MUTED")
 
         # 结果空态提示：有结果就收起来
         if hasattr(self, "result_empty_hint"):

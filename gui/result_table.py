@@ -215,6 +215,26 @@ class ResultTable(QTableWidget):
         self.setSortingEnabled(False)
         self.setRowCount(0)
 
+    def reapply_colors(self) -> None:
+        """主题切换后按新色板重绘全部单元格颜色。
+
+        表格的延迟/速度/评分配色是用 QColor 直接写进单元格的，
+        不会随全局 QSS 自动更新，故切换主题后必须显式重绘一遍。
+
+        注意：set_ranking / set_final_ranking 内部会清空其他快照，
+        因此这里先取副本，避免重绘过程本身破坏数据。
+        """
+        final_snapshot = list(self._final_entries)
+        rank_snapshot = list(self._rank_entries)
+        result_snapshot = list(self._results)
+
+        if final_snapshot:
+            self.set_final_ranking(final_snapshot)
+        elif rank_snapshot:
+            self.set_ranking(rank_snapshot)
+        elif result_snapshot:
+            self.set_results(result_snapshot)
+
     def add_results(self, results: Sequence[TestResult]) -> None:
         """批量追加结果（测速过程中使用，此时尚无排名/评分）。"""
         if not results:

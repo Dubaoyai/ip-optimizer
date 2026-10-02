@@ -35,9 +35,15 @@ logger: logging.Logger = get_logger()
 COUNT_CHOICES = (100, 500, 1000, 3000, 5000, 10000)
 DEFAULT_COUNT = 1000
 
-# 状态文字颜色统一取自黑灰主题（gui/theme.py），不写死色值
-COLOR_OK = QColor(theme.GREEN)     # 青绿：成功
-COLOR_ERROR = QColor(theme.RED)    # 红：失败
+
+def _ok_color() -> QColor:
+    """成功状态色（运行时取，随主题切换而变化）。"""
+    return QColor(theme.color("GREEN"))
+
+
+def _error_color() -> QColor:
+    """失败状态色（运行时取，随主题切换而变化）。"""
+    return QColor(theme.color("RED"))
 
 
 class FetchSettingsDialog(QDialog):
@@ -164,7 +170,7 @@ class FetchSettingsDialog(QDialog):
         """获取完成：显示统计信息。"""
         self.set_running(False)
         self.status_label.setText(f"状态：获取完成，新增 {len(ips)} 个候选 IP，已加入当前 IP 列表")
-        self.status_label.setStyleSheet(f"color: {COLOR_OK.name()};")
+        self.status_label.setStyleSheet(f"color: {_ok_color().name()};")
 
         self.result_labels["source"].setText("IP来源：Cloudflare 官方")
         self.result_labels["cidr"].setText(f"CIDR数量：{cidr_count}")
@@ -177,7 +183,7 @@ class FetchSettingsDialog(QDialog):
         """获取失败：显示中文错误。"""
         self.set_running(False)
         self.status_label.setText(f"状态：{message}")
-        self.status_label.setStyleSheet(f"color: {COLOR_ERROR.name()};")
+        self.status_label.setStyleSheet(f"color: {_error_color().name()};")
         QMessageBox.critical(self, "获取失败", message)
 
     # ------------------------------------------------------------------
@@ -199,7 +205,7 @@ class FetchSettingsDialog(QDialog):
                 f"（HTTP {result.status_code}，IPv4 CIDR {result.cidr_count} 个，"
                 f"耗时 {result.latency_ms} ms，来源：{source_text}）"
             )
-            self.status_label.setStyleSheet(f"color: {COLOR_OK.name()};")
+            self.status_label.setStyleSheet(f"color: {_ok_color().name()};")
         else:
             self.status_label.setText(f"状态：连接失败：{result.error}")
-            self.status_label.setStyleSheet(f"color: {COLOR_ERROR.name()};")
+            self.status_label.setStyleSheet(f"color: {_error_color().name()};")

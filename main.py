@@ -11,6 +11,7 @@ import types
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from gui import theme
 from gui.main_window import APP_TITLE, MainWindow
 from utils.logger import ensure_runtime_dirs, get_logger
 
@@ -52,6 +53,11 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
     _install_exception_hook(logger)
+
+    # 应用主题：默认深色；若用户上次切换过则沿用上次选择（深色/浅色/跟随系统）
+    saved_mode = theme.load_saved_mode()
+    theme.apply_theme(app, saved_mode)
+    logger.info("主题模式：%s（用户可在界面右上角切换）", saved_mode)
 
     window = MainWindow()
     window.show()

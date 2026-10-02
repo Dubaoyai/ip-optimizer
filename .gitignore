@@ -11,6 +11,7 @@ venv/
 logs/
 output/*
 !output/.gitkeep
+ui_prefs.json
 
 # 编辑器 / 系统文件
 .vscode/

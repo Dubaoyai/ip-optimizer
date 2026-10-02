@@ -122,6 +122,7 @@ class IPPanel(QGroupBox):
 
         # 4) 统计信息（改为「小标签 + 大数字」的卡片式排版，比纯文字行更易扫读）
         self.stat_labels: dict[str, QLabel] = {}
+        self._stat_accent_keys: dict[str, str] = {}   # 每个数字的强调色键名（主题切换用）
         stats_grid = QGridLayout()
         stats_grid.setSpacing(6)
         stat_items = (
@@ -144,10 +145,13 @@ class IPPanel(QGroupBox):
             cell_layout.addWidget(name_label)
 
             value_label = QLabel("0")
-            # 「有效IP」用青绿强调，其余用主文字色
-            color = theme.GREEN if key == "valid" else theme.TEXT_PRIMARY
+            # 「有效IP」用青绿强调，其余用主文字色；
+            # 记录强调键名，供主题切换时按新色板重绘（否则切浅色后数字会看不清）。
+            accent_key = "GREEN" if key == "valid" else "TEXT_PRIMARY"
+            self._stat_accent_keys[key] = accent_key
             value_label.setStyleSheet(
-                f"color: {color}; font-size: 15px; font-weight: bold; background: transparent;"
+                f"color: {theme.color(accent_key)};"
+                "font-size: 15px; font-weight: bold; background: transparent;"
             )
             cell_layout.addWidget(value_label)
             cell_layout.addStretch(1)
@@ -156,11 +160,23 @@ class IPPanel(QGroupBox):
             stats_grid.addWidget(cell, index // 3, index % 3)
         layout.addLayout(stats_grid)
 
+        # 主题切换时按新色板重绘统计数字
+        theme.on_changed(self._reapply_stat_colors)
+
         # 5) 自动获取状态（获取完成后显示摘要）
         self.fetch_status_label = QLabel("自动获取：尚未使用（点击【自动获取IP】从 Cloudflare 获取）")
         self.fetch_status_label.setObjectName("Muted")
         self.fetch_status_label.setWordWrap(True)
         layout.addWidget(self.fetch_status_label)
+
+    def _reapply_stat_colors(self) -> None:
+        """主题切换回调：按当前色板重设各统计数字的颜色。"""
+        for key, label in self.stat_labels.items():
+            accent_key = self._stat_accent_keys.get(key, "TEXT_PRIMARY")
+            label.setStyleSheet(
+                f"color: {theme.color(accent_key)};"
+                "font-size: 15px; font-weight: bold; background: transparent;"
+            )
 
     # ==================================================================
     # 对外接口
