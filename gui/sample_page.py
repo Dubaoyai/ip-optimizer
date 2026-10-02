@@ -55,6 +55,8 @@ from PySide6.QtWidgets import (
 
 from core.sampler import (
     BUILT_IN_PORTS,
+    CONCURRENCY_MAX,
+    CONCURRENCY_MIN,
     DEFAULT_CIDRS,
     DEFAULT_CONCURRENCY,
     DEFAULT_KEEP_N,
@@ -63,9 +65,15 @@ from core.sampler import (
     DEFAULT_TEMPLATE,
     DEFAULT_TIMEOUT_MS,
     FAST_MS,
+    KEEP_N_MAX,
+    KEEP_N_MIN,
     MID_MS,
+    SAMPLE_PER_CIDR_MAX,
+    SAMPLE_PER_CIDR_MIN,
     SOURCE_LABELS,
     SPEED_SOURCES,
+    TIMEOUT_MAX_MS,
+    TIMEOUT_MIN_MS,
     ProbeResult,
     SampleEngine,
     SampleStats,
@@ -171,28 +179,32 @@ class SamplePage(QWidget):
 
         grid.addWidget(widgets.hint_label("每段抽样", "muted"), 0, 0)
         self.per_cidr_spin = QSpinBox()
-        self.per_cidr_spin.setRange(10, 5000)
+        # 取值范围逐字对齐原 HTML：min=10 max=2000 value=200
+        self.per_cidr_spin.setRange(SAMPLE_PER_CIDR_MIN, SAMPLE_PER_CIDR_MAX)
         self.per_cidr_spin.setValue(DEFAULT_SAMPLE_PER_CIDR)
         self.per_cidr_spin.setToolTip("每个 CIDR 网段随机抽取多少个 IP 参与测速")
         grid.addWidget(self.per_cidr_spin, 1, 0)
 
         grid.addWidget(widgets.hint_label("并发数", "muted"), 0, 1)
         self.concurrency_spin = QSpinBox()
-        self.concurrency_spin.setRange(1, 500)
+        # 对齐原版：min=1 max=100 value=30
+        self.concurrency_spin.setRange(CONCURRENCY_MIN, CONCURRENCY_MAX)
         self.concurrency_spin.setValue(DEFAULT_CONCURRENCY)
         self.concurrency_spin.setToolTip("同时探测多少个 IP（越大越快，对网络压力也越大）")
         grid.addWidget(self.concurrency_spin, 1, 1)
 
         grid.addWidget(widgets.hint_label("超时(ms)", "muted"), 2, 0)
         self.timeout_spin = QSpinBox()
-        self.timeout_spin.setRange(100, 10000)
+        # 对齐原版：min=200 max=3000 value=800
+        self.timeout_spin.setRange(TIMEOUT_MIN_MS, TIMEOUT_MAX_MS)
         self.timeout_spin.setValue(DEFAULT_TIMEOUT_MS)
         self.timeout_spin.setSingleStep(100)
         grid.addWidget(self.timeout_spin, 3, 0)
 
         grid.addWidget(widgets.hint_label("保留最优N", "muted"), 2, 1)
         self.keep_n_spin = QSpinBox()
-        self.keep_n_spin.setRange(1, 1000)
+        # 对齐原版：min=1 max=300 value=20
+        self.keep_n_spin.setRange(KEEP_N_MIN, KEEP_N_MAX)
         self.keep_n_spin.setValue(DEFAULT_KEEP_N)
         self.keep_n_spin.setToolTip("「一键复制最优N条」复制多少条")
         grid.addWidget(self.keep_n_spin, 3, 1)
@@ -248,7 +260,8 @@ class SamplePage(QWidget):
         for key, label, unit, icon, color_key in (
             ("cand", "候选", "", "▦", "ACCENT"),
             ("test", "已测", "", "✓", "BLUE"),
-            ("pass", "可用", "", "≡", "GREEN"),
+            # 文案对齐原版："可用/保留"
+            ("pass", "可用/保留", "", "≡", "GREEN"),
             ("fast", "最优", "ms", "◷", "ORANGE"),
         ):
             card = widgets.StatCard(label, "0", unit, icon, color_key)
@@ -686,7 +699,10 @@ class SamplePage(QWidget):
 
         self.stat_cards["cand"].set_value(str(len(self._engine.candidates)), "ACCENT")
         self.stat_cards["test"].set_value(str(self._engine.tested_count()), "BLUE")
-        self.stat_cards["pass"].set_value(str(stats.passing), "GREEN")
+        # 对齐原版语义：可用/保留 = 当前可用数 / 保留最优N 的设定值
+        self.stat_cards["pass"].set_value(
+            f"{stats.passing}/{self.keep_n_spin.value()}", "GREEN"
+        )
         self.stat_cards["fast"].set_value(
             f"{stats.fastest_ms:.0f}" if stats.fastest_ms is not None else "--",
             "ORANGE",

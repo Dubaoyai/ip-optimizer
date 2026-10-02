@@ -15,8 +15,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFrame,
     QHBoxLayout,
@@ -376,12 +377,12 @@ class PortSelector(QWidget):
             self._checks[port] = box
             panel_layout.addWidget(box)
 
-        # 全选 / 全不选
+        # 全选 / 清空（文案对齐原版 HTML：portAll="全选" / portNone="清空"）
         action_row = QHBoxLayout()
         action_row.setSpacing(6)
         all_btn = ghost_button("全选")
         all_btn.clicked.connect(self.select_all)
-        none_btn = ghost_button("全不选")
+        none_btn = ghost_button("清空")
         none_btn.clicked.connect(self.select_none)
         action_row.addWidget(all_btn)
         action_row.addWidget(none_btn)
@@ -406,6 +407,30 @@ class PortSelector(QWidget):
         """展开 / 收起面板。"""
         self._expanded = not self._expanded
         self._panel.setVisible(self._expanded)
+        if self._expanded:
+            # 对齐原版：点击面板外部时自动收起
+            QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt 规定命名)
+        """点击面板外部时收起（对应原版 document 上的 click 监听）。
+
+        Args:
+            obj: 事件目标。
+            event: 事件对象。
+
+        Returns:
+            False 表示不拦截事件，继续正常派发。
+        """
+        if self._expanded and event.type() == QEvent.Type.MouseButtonPress:
+            # 若点击位置不在按钮与面板内，则收起
+            pos = event.globalPosition().toPoint()
+            inside_button = self._button.rect().contains(self._button.mapFromGlobal(pos))
+            inside_panel = self._panel.rect().contains(self._panel.mapFromGlobal(pos))
+            if not inside_button and not inside_panel:
+                self._panel.setVisible(False)
+                self._expanded = False
+                QApplication.instance().removeEventFilter(self)
+        return False
 
     def _refresh_label(self) -> None:
         """刷新按钮上的摘要文字。"""

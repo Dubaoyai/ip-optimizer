@@ -36,17 +36,18 @@ BUILT_IN_PORTS: Tuple[int, ...] = (
 )
 DEFAULT_PORTS: Tuple[int, ...] = (80, 443)
 
-# 测速源：路径与浏览器版一致
+# 测速源：路径与键名**逐字对齐原版 HTML**（原版 option value="cachefly"）
 SPEED_SOURCES: Dict[str, str] = {
     "cloudflare": "/__down?bytes=10000000",
-    "custom": "/50mb.test",
+    "cachefly": "/50mb.test",
 }
 SOURCE_LABELS: Dict[str, str] = {
     "cloudflare": "Cloudflare 10MB (/__down?bytes=10000000)",
-    "custom": "自定义 50MB (/50mb.test)",
+    "cachefly": "CacheFly 50MB (/50mb.test)",
 }
 
-# 默认 CIDR 网段（与浏览器版内置列表一致）
+# 默认 CIDR 网段（**逐字复制原 HTML textarea 内容**，22 段，含 7 个 IPv6 段；
+# 注意：原版这 22 段里 103.21.244.0/22、104.16.0.0/13 等确有重复，属原版原样，不擅自"修正"）
 DEFAULT_CIDRS: str = """103.21.244.0/22
 103.22.200.0/22
 103.31.4.0/22
@@ -62,25 +63,37 @@ DEFAULT_CIDRS: str = """103.21.244.0/22
 190.93.240.0/20
 197.234.240.0/22
 198.41.128.0/17
-103.21.244.0/22
-104.16.0.0/12
-108.162.192.0/19
-131.0.72.0/23
-162.158.0.0/16
-172.64.0.0/14
-173.245.48.0/21"""
+2400:cb00::/32
+2606:4700::/32
+2803:f800::/32
+2405:b500::/32
+2405:8100::/32
+2a06:98c0::/29
+2c0f:f248::/32"""
 
-# 默认代理模板（浏览器版内置同款）
+# 默认代理模板（**逐字复制原 HTML textarea 内容**）
 DEFAULT_TEMPLATE: str = (
-    "vless://fa40af57-9498-46db-b347-975d38f306a5@190.93.246.162:807"
-    "?encryption=none&security=none&type=ws&host=white-..."
+    "vless://fa40fa57-9498-46db-b347-975d38f3a06a@190.93.246.162:80"
+    "?encryption=none&security=none&type=ws"
+    "&host=white-hat-c4f4.slo825030.workers.dev&path=%2F%3Fed%3D2048#%E8%81%94%E9%80%9A-80-WS"
 )
 
-# 默认参数
+# 默认参数（数值与取值范围**逐字对齐原 HTML input 的 value/min/max**）
 DEFAULT_SAMPLE_PER_CIDR = 200
+SAMPLE_PER_CIDR_MIN = 10
+SAMPLE_PER_CIDR_MAX = 2000
+
 DEFAULT_CONCURRENCY = 30
+CONCURRENCY_MIN = 1
+CONCURRENCY_MAX = 100
+
 DEFAULT_TIMEOUT_MS = 800
+TIMEOUT_MIN_MS = 200
+TIMEOUT_MAX_MS = 3000
+
 DEFAULT_KEEP_N = 20
+KEEP_N_MIN = 1
+KEEP_N_MAX = 300
 
 # 延迟配色阈值（毫秒）：与浏览器版的行样式一致
 FAST_MS = 100
