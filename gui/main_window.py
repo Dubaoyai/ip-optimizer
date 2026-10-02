@@ -66,6 +66,7 @@ from core.stability import StabilityData  # V1.4：稳定性复测统计数据�
 from core.tcp_tester import TestResult
 from gui import theme, widgets
 from gui.ip_panel import IPPanel
+from gui.sample_page import SamplePage
 from gui.result_table import ResultTable
 from gui.scan_worker import ScanWorker
 from gui.stability_worker import StabilityWorker  # V1.4：稳定性复测线程
@@ -196,6 +197,9 @@ class MainWindow(QMainWindow):
         self._pages["workbench"] = self._build_workbench_page()
         self._pages["results"] = self._build_results_page()
         self._pages["stability"] = self._build_stability_page()
+        # 第四视图：抽样测速（移植自《优选IP测速_重构版.html》）
+        self.sample_page = SamplePage()
+        self._pages["sample"] = self.sample_page
 
         # 把三个页面都加进内容区，靠显示/隐藏切换
         for page in self._pages.values():
@@ -256,6 +260,7 @@ class MainWindow(QMainWindow):
             ("workbench", "工作台", "▶"),
             ("results", "测试结果", "▤"),
             ("stability", "稳定性复测", "◈"),
+            ("sample", "抽样测速", "◇"),
         )
         for key, text, icon in nav_items:
             button = widgets.NavButton(text, icon)
@@ -341,6 +346,7 @@ class MainWindow(QMainWindow):
             "workbench": ("工作台", "导入候选 IP · 设置测速参数 · 开始测速"),
             "results": ("测试结果", "按综合评分排名 · 筛选 · 复制与导出"),
             "stability": ("稳定性复测", "对 TOP IP 多轮复测，取稳定者优先"),
+            "sample": ("抽样测速", "CIDR 抽样 → 并发测速 → 生成可用节点"),
         }
         title, subtitle = titles.get(key, ("工作台", ""))
         self.page_title.setText(title)
@@ -1617,6 +1623,10 @@ class MainWindow(QMainWindow):
 
         # 自动获取线程只是单个 HTTP 请求，最多等 3 秒即可安全退出
         self.ip_panel.shutdown_fetch()
+
+        # 抽样测速线程同样要安全收尾（会保存当前结果与配置）
+        if hasattr(self, "sample_page"):
+            self.sample_page.shutdown()
 
         logger.info("程序关闭：主窗口已关闭")
         event.accept()

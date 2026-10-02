@@ -12,6 +12,8 @@ logs/
 output/*
 !output/.gitkeep
 ui_prefs.json
+sample_prefs.json
+sample_results.json
 
 # 编辑器 / 系统文件
 .vscode/

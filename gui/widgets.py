@@ -13,13 +13,15 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, List, Optional, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -315,3 +317,196 @@ def ghost_button(text: str, tooltip: str = "") -> QPushButton:
     if tooltip:
         button.setToolTip(tooltip)
     return button
+
+
+# ======================================================================
+# 多端口选择器（对应原 HTML 的复选框下拉）
+# ======================================================================
+class PortSelector(QWidget):
+    """端口多选控件：一个显示按钮 + 展开的复选框面板。
+
+    对应原 HTML 的 portPicker：点击展开、勾选端口、支持全选/全不选；
+    收起时把已选端口折叠成摘要文字（≤3 个直接列出，多了显示数量）。
+    """
+
+    changed = Signal()  # 选择变化时发出
+
+    def __init__(
+        self,
+        ports: Sequence[int],
+        selected: Optional[Sequence[int]] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        """初始化端口选择器。
+
+        Args:
+            ports: 可选端口列表。
+            selected: 初始选中的端口；None 表示全部不选。
+            parent: 父控件。
+        """
+        super().__init__(parent)
+        self._all_ports = list(ports)
+        self._selected = set(selected or [])
+        self._expanded = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        # 显示按钮
+        self._button = QPushButton()
+        self._button.setObjectName("GhostButton")
+        self._button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._button.clicked.connect(self._toggle)
+        layout.addWidget(self._button)
+
+        # 展开面板
+        self._panel = QWidget()
+        self._panel.setObjectName("Card")
+        self._panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        panel_layout = QVBoxLayout(self._panel)
+        panel_layout.setContentsMargins(10, 8, 10, 8)
+        panel_layout.setSpacing(2)
+
+        self._checks: Dict[int, QCheckBox] = {}
+        for port in self._all_ports:
+            box = QCheckBox(str(port))
+            box.setChecked(port in self._selected)
+            box.toggled.connect(lambda checked, p=port: self._on_toggle(p, checked))
+            self._checks[port] = box
+            panel_layout.addWidget(box)
+
+        # 全选 / 全不选
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        all_btn = ghost_button("全选")
+        all_btn.clicked.connect(self.select_all)
+        none_btn = ghost_button("全不选")
+        none_btn.clicked.connect(self.select_none)
+        action_row.addWidget(all_btn)
+        action_row.addWidget(none_btn)
+        action_row.addStretch(1)
+        panel_layout.addLayout(action_row)
+
+        self._panel.setVisible(False)
+        layout.addWidget(self._panel)
+        self._refresh_label()
+
+    # ------------------------------------------------------------------
+    def _on_toggle(self, port: int, checked: bool) -> None:
+        """单个端口勾选变化。"""
+        if checked:
+            self._selected.add(port)
+        else:
+            self._selected.discard(port)
+        self._refresh_label()
+        self.changed.emit()
+
+    def _toggle(self) -> None:
+        """展开 / 收起面板。"""
+        self._expanded = not self._expanded
+        self._panel.setVisible(self._expanded)
+
+    def _refresh_label(self) -> None:
+        """刷新按钮上的摘要文字。"""
+        ports = sorted(self._selected)
+        if not ports:
+            text = "未选择端口"
+            tip = "点击选择要探测的端口"
+        elif len(ports) <= 3:
+            text = ",".join(str(p) for p in ports)
+            tip = ", ".join(str(p) for p in ports)
+        else:
+            text = f"已选 {len(ports)} 个端口"
+            tip = ", ".join(str(p) for p in ports)
+        self._button.setText(f"{text}  ▾")
+        self._button.setToolTip(tip)
+
+    # ------------------------------------------------------------------
+    def select_all(self) -> None:
+        """全选。"""
+        for port, box in self._checks.items():
+            box.blockSignals(True)
+            box.setChecked(True)
+            box.blockSignals(False)
+            self._selected.add(port)
+        self._refresh_label()
+        self.changed.emit()
+
+    def select_none(self) -> None:
+        """全不选。"""
+        for box in self._checks.values():
+            box.blockSignals(True)
+            box.setChecked(False)
+            box.blockSignals(False)
+        self._selected.clear()
+        self._refresh_label()
+        self.changed.emit()
+
+    def selected_ports(self) -> List[int]:
+        """返回当前选中的端口（升序）。"""
+        return sorted(self._selected)
+
+    def set_selected(self, ports: Sequence[int], notify: bool = False) -> None:
+        """直接设置选中的端口（用于从配置恢复）。
+
+        Args:
+            ports: 要选中的端口列表。
+            notify: 是否发出 changed 信号。默认 False —— 从配置恢复时不应
+                    反过来触发一次保存（避免无谓写盘）；用户操作导致的变更
+                    请用 set_selected(..., notify=True)。
+        """
+        self._selected = {int(p) for p in ports}
+        for port, box in self._checks.items():
+            box.blockSignals(True)
+            box.setChecked(port in self._selected)
+            box.blockSignals(False)
+        self._refresh_label()
+        if notify:
+            self.changed.emit()
+
+    def set_enabled_ui(self, enabled: bool) -> None:
+        """整体启用/禁用（测速进行中时锁定）。"""
+        self._button.setEnabled(enabled)
+        for box in self._checks.values():
+            box.setEnabled(enabled)
+
+
+# ======================================================================
+# 进度条（带「已测/总数」文字的浅封装）
+# ======================================================================
+class ProgressBar(QWidget):
+    """进度条：显示百分比与「已测 / 总数」文字。"""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        """初始化进度条。"""
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._bar.setFormat("%p%")
+        layout.addWidget(self._bar)
+
+        self._text = QLabel("0/0")
+        self._text.setObjectName("Muted")
+        self._text.setAlignment(Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(self._text)
+
+    def setValue(self, done: int, total: int) -> None:  # noqa: N802 (模仿 Qt 命名)
+        """更新进度。
+
+        Args:
+            done: 已完成数。
+            total: 总数；为 0 时进度归零。
+        """
+        if total <= 0:
+            self._bar.setValue(0)
+            self._text.setText("0/0")
+            return
+        percent = int(min(100, max(0, done * 100 / total)))
+        self._bar.setValue(percent)
+        self._text.setText(f"{done}/{total}")
