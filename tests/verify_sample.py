@@ -15,11 +15,19 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# ⚠ 关键：把偏好/结果重定向到临时目录，避免测试数据污染用户真实配置。
+# （曾发生：测试写入的 CIDR/模板把用户在界面上看到的默认值顶掉，用户以为「乱改」了）
+_TMP = Path(tempfile.mkdtemp(prefix="ipo_sample_test_"))
+os.environ["IPO_SAMPLE_PREFS"] = str(_TMP / "sample_prefs.json")
+os.environ["IPO_SAMPLE_RESULTS"] = str(_TMP / "sample_results.json")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -94,9 +102,9 @@ def main() -> int:
     app.processEvents()
 
     import json as _json
-    from utils.paths import data_root as _data_root
 
-    on_disk = _json.loads((_data_root() / "sample_prefs.json").read_text(encoding="utf-8"))
+    # 用页面自身的路径解析（会跟随测试重定向），而非硬编码真实路径
+    on_disk = _json.loads(page._prefs_path().read_text(encoding="utf-8"))
     check("⑪ 改动即落盘：每段抽样", on_disk.get("per_cidr") == 123,
           f"盘上 {on_disk.get('per_cidr')}")
     check("⑫ 改动即落盘：并发/超时/保留N",

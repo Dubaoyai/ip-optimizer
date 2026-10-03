@@ -332,11 +332,24 @@ class SamplePage(QWidget):
     # 偏好与结果持久化（对应原版 localStorage）
     # ==================================================================
     def _prefs_path(self) -> Path:
-        """偏好文件路径。"""
+        """偏好文件路径。
+
+        测试时可用环境变量 IPO_SAMPLE_PREFS 指向临时文件，避免污染用户真实配置。
+        """
+        import os
+
+        override = os.environ.get("IPO_SAMPLE_PREFS")
+        if override:
+            return Path(override)
         return data_root() / PREFS_FILE
 
     def _results_path(self) -> Path:
-        """结果文件路径。"""
+        """结果文件路径（同样支持环境变量覆盖，防测试污染）。"""
+        import os
+
+        override = os.environ.get("IPO_SAMPLE_RESULTS")
+        if override:
+            return Path(override)
         return data_root() / RESULTS_FILE
 
     def _load_prefs(self) -> None:
