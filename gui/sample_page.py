@@ -317,13 +317,20 @@ class SamplePage(QWidget):
         body.addLayout(card_row)
 
         # ---- 汇总行 ----
+        # ---- 汇总行 ----
+        # 三个标签必须**单行显示且基线对齐**：端口分布内容可能较长
+        # （如「端口分布: 80×103  443×47」），若允许换行会折成两行，
+        # 与左右两个单行标签形成上下错位。
         summary_row = QHBoxLayout()
         summary_row.setSpacing(16)
         self.rate_label = widgets.hint_label("存活率: --", "muted")
         self.avg_label = widgets.hint_label("平均延迟: --", "muted")
         self.port_label = widgets.hint_label("端口分布: --", "muted")
         for lb in (self.rate_label, self.avg_label, self.port_label):
+            lb.setWordWrap(False)                                   # 禁止折行
+            lb.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             summary_row.addWidget(lb)
+        # 端口分布放在最右，内容多时不挤压左侧两个指标
         summary_row.addStretch(1)
         body.addLayout(summary_row)
 
@@ -893,12 +900,19 @@ class SamplePage(QWidget):
         self.avg_label.setText(
             f"平均延迟: {stats.avg_ms:.0f}ms" if stats.avg_ms is not None else "平均延迟: --"
         )
+        # 端口分布：单行显示，最多列 3 个端口，多余的折叠成「+N」
+        # （旧写法列 5 个会把标签撑长，与左侧指标一起挤成两行造成错位）
         if stats.port_dist:
-            self.port_label.setText(
-                "端口分布: " + "  ".join(f"{p}×{n}" for p, n in stats.port_dist[:5])
-            )
+            shown = "  ".join(f"{p}×{n}" for p, n in stats.port_dist[:3])
+            rest = len(stats.port_dist) - 3
+            text = f"端口分布: {shown}" + (f"  +{rest}种" if rest > 0 else "")
+            self.port_label.setText(text)
+            # 完整分布放进 tooltip，信息不丢
+            full = "  ".join(f"{p}×{n}" for p, n in stats.port_dist)
+            self.port_label.setToolTip(f"完整端口分布：{full}")
         else:
             self.port_label.setText("端口分布: --")
+            self.port_label.setToolTip("")
 
         self._refresh_buttons()
 
