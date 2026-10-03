@@ -105,11 +105,6 @@ class FetchWorker(QThread):
         )
         self.fetch_finished.emit(ips, cidr_count, elapsed, result)
 
-    @staticmethod
-    def is_valid_count(value: int) -> bool:
-        """数量是否在安全范围内（供界面校验输入）。"""
-        return MIN_GENERATE_COUNT <= value <= MAX_GENERATE_COUNT
-
 
 class TestConnectionWorker(QThread):
     """「测试Cloudflare连接」的后台线程：只测试 API 连通性，不生成 IP。"""

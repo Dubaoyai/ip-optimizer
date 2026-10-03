@@ -326,28 +326,6 @@ def load_saved_mode() -> str:
     return DEFAULT_MODE
 
 
-def load_saved_mode_legacy() -> str:
-    """读取偏好文件里保存的主题（历史行为，仅保留供排查/迁移使用）。
-
-    ⚠️ 普通启动**不要**调用本函数 —— 它会让旧配置覆盖默认深色，
-    这正是「设了默认深色却打开浅色」的成因。
-
-    Returns:
-        偏好文件中的模式；文件不存在/损坏/非法时返回 DEFAULT_MODE。
-    """
-    path = _prefs_path()
-    if path is None or not path.exists():
-        return DEFAULT_MODE
-    try:
-        import json
-
-        data = json.loads(path.read_text(encoding="utf-8"))
-        mode = data.get("theme_mode")
-        return mode if mode in MODES else DEFAULT_MODE
-    except Exception:
-        return DEFAULT_MODE
-
-
 def save_mode(mode: str) -> None:
     """保存主题模式到偏好文件（失败不抛异常，不影响使用）。
 
@@ -1043,12 +1021,3 @@ def apply_theme(app, mode: str = DEFAULT_MODE) -> str:
             pass
 
     return effective
-
-
-def restyle(widget) -> None:
-    """对单个控件重新应用样式（动态创建、后加入界面的控件用）。
-
-    Args:
-        widget: 任意 QWidget。
-    """
-    widget.setStyleSheet(build_qss())

@@ -134,6 +134,15 @@ class ResultTable(QTableWidget):
     COL_FINAL_RANK = 15      # 最终排名
     COL_STATUS = 16          # 总状态（保持放在最后一列）
 
+    # ---- 核心列（默认显示）----
+    # 17 列全展开时，普通屏幕必须横向滚动才能看全，关键信息不集中。
+    # 这里把列分成「核心 / 详细」两组：默认只显示核心列，
+    # 需要看稳定性明细时点「显示全部列」展开。
+    CORE_COLUMNS = (
+        COL_RANK, COL_IP, COL_PORT, COL_LATENCY,
+        COL_SPEED, COL_SCORE, COL_FINAL_RANK, COL_STATUS,
+    )
+
     def __init__(self, parent=None) -> None:
         super().__init__(0, len(self.HEADERS), parent)
         self.setHorizontalHeaderLabels(list(self.HEADERS))
@@ -178,6 +187,37 @@ class ResultTable(QTableWidget):
         self._results: List[TestResult] = []              # 原始测速结果（测速线程实时写入）
         self._rank_entries: List[RankEntry] = []          # V1.3 排名快照（测速结束后生成）
         self._final_entries: List[FinalEntry] = []        # V1.4 最终排名快照（复测后生成）
+        self._show_all_columns = False                    # 是否展开全部列
+
+        # 默认只显示核心列，避免 17 列挤压
+        self.set_show_all_columns(False)
+
+    # ------------------------------------------------------------------
+    # 列显示控制
+    # ------------------------------------------------------------------
+    def set_show_all_columns(self, show_all: bool) -> None:
+        """切换「只显示核心列」与「显示全部列」。
+
+        Args:
+            show_all: True 显示全部 17 列；False 只显示核心列。
+        """
+        self._show_all_columns = show_all
+        for index in range(len(self.HEADERS)):
+            if show_all:
+                self.setColumnHidden(index, False)
+            else:
+                self.setColumnHidden(index, index not in self.CORE_COLUMNS)
+
+    @property
+    def show_all_columns(self) -> bool:
+        """当前是否展开全部列。"""
+        return self._show_all_columns
+
+    def visible_columns_count(self) -> int:
+        """当前可见列数（供测试与状态显示使用）。"""
+        return sum(
+            1 for i in range(len(self.HEADERS)) if not self.isColumnHidden(i)
+        )
 
     # ------------------------------------------------------------------
     # 对外接口
@@ -191,6 +231,26 @@ class ResultTable(QTableWidget):
     def rank_entries(self) -> List[RankEntry]:
         """当前排名快照（测速结束后可用；测速中为空列表）。"""
         return list(self._rank_entries)
+
+    def selected_ips(self) -> List[str]:
+        """返回用户当前选中的行的 IP（按表格行顺序，去重）。
+
+        用途：用户只需其中几个 IP 时，不必全量导出再手工删。
+
+        Returns:
+            选中的 IP 列表；没有选中时返回空列表。
+        """
+        rows = sorted({idx.row() for idx in self.selectedIndexes()})
+        ips: List[str] = []
+        for row in rows:
+            item = self.item(row, self.COL_IP)
+            if item is not None and item.text():
+                ips.append(item.text())
+        return ips
+
+    def selected_rows_count(self) -> int:
+        """当前选中的行数。"""
+        return len({idx.row() for idx in self.selectedIndexes()})
 
     def top_ips(self, n: int) -> List[str]:
         """取前 N 名的有效 IP（只含成功 IP，供一键复制/导出使用）。

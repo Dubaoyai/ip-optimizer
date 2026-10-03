@@ -97,14 +97,6 @@ class StabilityData:
     def avg_download_speed(self):
         return sum(self.download_speeds) / len(self.download_speeds) if self.download_speeds else None
 
-    @property
-    def max_download_speed(self):
-        return max(self.download_speeds) if self.download_speeds else None
-
-    @property
-    def min_download_speed(self):
-        return min(self.download_speeds) if self.download_speeds else None
-
     # ---- 波动（变异系数）----
     @property
     def tcp_cv(self):

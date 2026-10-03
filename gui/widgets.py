@@ -270,13 +270,6 @@ class Divider(QFrame):
         )
 
 
-def section_title(text: str) -> QLabel:
-    """构造一个小节标题标签。"""
-    label = QLabel(text)
-    label.setObjectName("PanelTitle")
-    return label
-
-
 def hint_label(text: str = "", tone: str = "muted") -> QLabel:
     """构造提示文字标签。
 

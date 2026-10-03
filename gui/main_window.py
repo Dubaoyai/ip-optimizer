@@ -521,21 +521,97 @@ class MainWindow(QMainWindow):
         if hasattr(self, "result_empty_hint"):
             self.result_empty_hint.setVisible(not entries)
 
+        # 工作台流程引导条随数据状态同步
+        self._refresh_guide()
+
     # ------------------------------------------------------------------
     # 页面 1：工作台（IP 来源 + 测速设置 + 测速进度）
     # ------------------------------------------------------------------
     def _build_workbench_page(self) -> QWidget:
-        """构建工作台页面：IP 来源面板、测速设置面板、测试进度面板。"""
+        """构建工作台页面：流程引导 + IP 来源面板 + 测速设置 + 测试进度。"""
         page = QWidget()
         page.setObjectName("PageContainer")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
+        layout.addWidget(self._build_guide_bar())
         layout.addWidget(self.stat_row)
         layout.addWidget(self._build_ip_panel_card())
         layout.addWidget(self._build_setting_group())
         layout.addWidget(self._build_progress_group())
         return page
+
+    def _build_guide_bar(self) -> QWidget:
+        """工作台顶部的流程引导条：告诉用户现在该做哪一步。
+
+        新用户最容易卡在「打开后不知道先干什么」，这里用三步骤可视化
+        当前进度，并随数据状态自动高亮当前应做的一步。
+        """
+        panel = widgets.Panel("使用流程", "三步完成优选")
+        body = panel.body_layout
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.guide_labels: Dict[str, QLabel] = {}
+        steps = (
+            ("ip", "① 导入候选 IP", "从文件/粘贴/自动获取三种方式任选"),
+            ("scan", "② 开始测速", "按当前参数测试延迟与速度"),
+            ("result", "③ 查看与导出", "到「测试结果」复制或导出节点"),
+        )
+        for key, title, desc in steps:
+            cell = QWidget()
+            cell_layout = QVBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(2)
+            t = QLabel(title)
+            t.setObjectName("Secondary")
+            t.setStyleSheet(
+                f"color: {theme.color('TEXT_MUTED')}; font-size: 13px; font-weight: bold;"
+                "background: transparent;"
+            )
+            d = widgets.hint_label(desc, "muted")
+            d.setWordWrap(False)
+            cell_layout.addWidget(t)
+            cell_layout.addWidget(d)
+            self.guide_labels[key] = t
+            row.addWidget(cell, 1)
+        body.addLayout(row)
+
+        self.guide_hint = widgets.hint_label(
+            "第 ① 步：请先导入候选 IP（上方「IP 来源」区域）", "accent"
+        )
+        body.addWidget(self.guide_hint)
+        self._guide_panel = panel
+        return panel
+
+    def _refresh_guide(self) -> None:
+        """按当前数据状态刷新流程引导条的高亮与提示文案。"""
+        if not hasattr(self, "guide_labels"):
+            return
+        has_ips = bool(self._valid_entries)
+        has_results = bool(self.result_table.rank_entries)
+        has_final = bool(self.result_table.final_entries)
+
+        active = "result" if has_results else ("scan" if has_ips else "ip")
+        for key, label in self.guide_labels.items():
+            is_active = key == active
+            color = theme.color("ACCENT") if is_active else theme.color("TEXT_MUTED")
+            label.setStyleSheet(
+                f"color: {color}; font-size: 13px; font-weight: bold;"
+                "background: transparent;"
+            )
+
+        if active == "ip":
+            text = "第 ① 步：请先导入候选 IP（下方「IP 来源」区域，可粘贴或自动获取）"
+        elif active == "scan":
+            count = len(self._valid_entries)
+            text = f"第 ② 步：已导入 {count} 个 IP，点【开始测速】即可"
+        else:
+            if has_final:
+                text = "第 ③ 步：测速与复测已完成，到「测试结果」复制或导出节点"
+            else:
+                text = "第 ③ 步：测速完成，到「测试结果」查看排名；如需更稳的节点可先做「稳定性复测」"
+        self.guide_hint.setText(text)
 
     def _build_ip_panel_card(self) -> QWidget:
         """把 IP 来源面板包进黑灰主题的卡片容器里。"""
@@ -868,6 +944,16 @@ class MainWindow(QMainWindow):
         self.apply_filter_button.setToolTip("按上面的条件重新计算排名（测速结束后可用）")
         self.apply_filter_button.clicked.connect(self._apply_ranking_from_ui)
         filter_layout.addWidget(self.apply_filter_button)
+
+        # 列显示切换：默认只显示核心列（避免 17 列挤压需横向滚动）
+        self.column_toggle_button = widgets.ghost_button(
+            "显示全部列",
+            "切换显示全部 17 列（含稳定性明细）；默认只显示核心列，避免横向滚动",
+        )
+        self.column_toggle_button.setCheckable(True)
+        self.column_toggle_button.toggled.connect(self._on_toggle_columns)
+        filter_layout.addWidget(self.column_toggle_button)
+
         filter_layout.addStretch(1)
         layout.addLayout(filter_layout)
 
@@ -931,6 +1017,10 @@ class MainWindow(QMainWindow):
         # ---- 节点操作行（依赖代理模板） ----
         node_layout = QHBoxLayout()
         node_layout.setSpacing(8)
+        self.copy_selected_button = widgets.ghost_button(
+            "复制选中行", "只复制你在表格里选中的行（按住 Ctrl/Shift 可多选）"
+        )
+        self.copy_selected_button.clicked.connect(self._on_copy_selected)
         self.copy_nodes_button = widgets.primary_button(
             "复制节点", "把优选 IP 套进模板生成节点链接，复制到剪贴板（可直接在 V2RayN 从剪贴板导入）"
         )
@@ -939,7 +1029,7 @@ class MainWindow(QMainWindow):
             "导出节点", "把节点链接保存为 txt（会弹出保存位置选择）"
         )
         self.export_nodes_button.clicked.connect(self._on_export_nodes)
-        for button in (self.copy_nodes_button, self.export_nodes_button):
+        for button in (self.copy_selected_button, self.copy_nodes_button, self.export_nodes_button):
             button.setEnabled(False)  # 测速结束后才有数据
             node_layout.addWidget(button)
         node_layout.addStretch(1)
@@ -951,6 +1041,17 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.result_summary_label)
 
         return group
+
+    def _on_toggle_columns(self, show_all: bool) -> None:
+        """切换结果表格的列显示（核心列 / 全部列）。
+
+        Args:
+            show_all: 是否显示全部列。
+        """
+        self.result_table.set_show_all_columns(show_all)
+        self.column_toggle_button.setText("只显示核心列" if show_all else "显示全部列")
+        count = self.result_table.visible_columns_count()
+        self._set_status(f"结果表格当前显示 {count} 列", "muted")
 
     def _on_result_template_changed(self) -> None:
         """结果页模板变化：校验并给出即时反馈。"""
@@ -990,6 +1091,70 @@ class MainWindow(QMainWindow):
             )
         except ExportError:
             return []
+
+    def _on_copy_selected(self) -> None:
+        """复制用户在表格里选中的行（IP 或节点，取决于是否填了模板）。
+
+        有模板时复制节点链接，否则复制纯 IP —— 与用户此时的目的相符。
+        """
+        ips = self.result_table.selected_ips()
+        if not ips:
+            QMessageBox.information(
+                self, "没有选中行",
+                "请先在下方表格里选中若干行（按住 Ctrl 或 Shift 可多选），再点【复制选中行】。",
+            )
+            return
+
+        template = self.result_template_edit.text().strip()
+        if template:
+            # 有模板 → 生成节点（只针对选中的行）
+            from utils.export import ExportError, build_nodes_from_entries
+
+            selected = [
+                e for e in self.result_table.rank_entries if e.result.ip in set(ips)
+            ]
+            if not selected:
+                # 排名表里找不到（例如表格显示的是原始结果），退化为直接套模板
+                from core.sampler import build_node, extract_template_port
+
+                parsed = extract_template_port(template)
+                if parsed is None:
+                    QMessageBox.warning(self, "模板格式有误", "模板中未找到 @IP:端口 格式。")
+                    return
+                _, pair = parsed
+                nodes = [
+                    build_node(template, ip, self._find_port_by_ip(ip), pair) for ip in ips
+                ]
+            else:
+                try:
+                    nodes = build_nodes_from_entries(selected, template, top_n=len(selected))
+                except ExportError as exc:
+                    QMessageBox.warning(self, "模板格式有误", str(exc))
+                    return
+            QApplication.clipboard().setText("\n".join(nodes))
+            self._set_status(f"已复制选中的 {len(nodes)} 条节点到剪贴板", "success")
+            logger.info("用户复制选中节点：%s 条", len(nodes))
+        else:
+            QApplication.clipboard().setText("\n".join(ips))
+            self._set_status(f"已复制选中的 {len(ips)} 个 IP 到剪贴板", "success")
+            logger.info("用户复制选中 IP：%s 个", len(ips))
+
+    def _find_port_by_ip(self, ip: str) -> int:
+        """按 IP 查其实测端口（查不到时回退 443）。
+
+        Args:
+            ip: 目标 IP。
+
+        Returns:
+            端口号。
+        """
+        for entry in self.result_table.rank_entries:
+            if entry.result.ip == ip:
+                return entry.result.port
+        for entry in self.result_table.results:
+            if entry.ip == ip:
+                return entry.port
+        return 443
 
     def _on_copy_nodes(self) -> None:
         """复制节点链接到剪贴板。"""
@@ -1221,7 +1386,7 @@ class MainWindow(QMainWindow):
         for button in (
             self.copy_top10_button, self.copy_top50_button, self.copy_top100_button,
             self.export_txt_button, self.export_csv_button,
-            self.copy_nodes_button, self.export_nodes_button,
+            self.copy_selected_button, self.copy_nodes_button, self.export_nodes_button,
         ):
             button.setEnabled(enabled)
 

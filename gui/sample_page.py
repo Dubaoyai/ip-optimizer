@@ -995,16 +995,64 @@ class SamplePage(QWidget):
         QMessageBox.information(self, "保存成功", f"已保存 {len(nodes)} 条节点：\n{path}")
 
     def _on_clear(self) -> None:
-        """清空结果与已测记录（对应 sampleClear）。"""
+        """清空结果与已测记录（对应 sampleClear）。
+
+        破坏性操作，**先二次确认**（此前无确认，误点即丢失全部测速结果）。
+        用户可选择粒度：
+        - 只清结果（保留去重记录，避免重复测同一批 IP）；
+        - 完全重置（结果与去测记录一起清）。
+        """
         if self._running:
             QMessageBox.information(self, "提示", "测速运行中，请先停止再清空。")
             return
-        self._engine.clear()
+
+        count = len(self._engine.passing)
+        tested = self._engine.tested_count()
+        if count == 0 and tested == 0:
+            # 没有可清的内容，无需打扰用户
+            self.status_label.setText("当前没有结果，无需清空")
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle("清空结果")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            f"当前有 {count} 个可用节点、{tested} 条已测记录。\n\n请选择清空方式："
+        )
+        keep_btn = box.addButton("只清结果（保留去重记录）", QMessageBox.ButtonRole.AcceptRole)
+        full_btn = box.addButton("完全重置（含去重记录）", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        # ⚠ 关键：用户按 Esc / 点关闭窗口时 clickedButton() 返回 None，
+        # 必须与「完全重置」区分开 —— 否则关掉对话框反而会清空数据（数据丢失级缺陷）。
+        if clicked is None or clicked is cancel_btn:
+            logger.info("用户取消了清空操作")
+            return
+
+        if clicked is keep_btn:
+            # 只清结果：保留 tested 集合，重新抽样时不会重复测同一批 IP
+            self._engine.passing = []
+            self._engine.candidates = []
+            self._engine._stop_flag = False
+            action_text = "已清空结果（保留了去重记录，重抽不会重复测同一批 IP）"
+            logger.info("用户清空了结果（保留去重记录 %s 条）", tested)
+        elif clicked is full_btn:
+            self._engine.clear()
+            action_text = "已完全重置：结果与去重记录均已清空"
+            logger.info("用户完全重置了抽样数据")
+        else:
+            # 兜底：未知按钮一律视为取消，绝不误删数据
+            logger.warning("清空对话框返回了未知按钮，按取消处理")
+            return
+
         self.table.setRowCount(0)
         self.empty_label.setVisible(True)
         self.progress_bar.setValue(0, 0)
-        self.status_label.setObjectName("Muted")
-        self.status_label.setText("已清空结果与已测记录，可重新抽样测速")
+        self.status_label.setObjectName("Success")
+        self.status_label.setText(action_text)
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
         try:
@@ -1012,7 +1060,6 @@ class SamplePage(QWidget):
         except OSError:
             pass
         self._update_stats()
-        logger.info("用户清空了抽样结果")
 
     # ==================================================================
     # 生命周期
