@@ -142,6 +142,11 @@ def main() -> int:
         check("⑯ 导出节点：不含模板占位 IP", "1.2.3.4" not in content)
 
     # ---------- 6. 导出 TXT / CSV 走另存为 ----------
+    # ⚠ 所有导出成功后都会弹 QMessageBox.information，必须全程 mock，
+    #    否则测试会阻塞在真实模态框上（此前踩过这个坑）。
+    _orig_information = QMessageBox.information
+    QMessageBox.information = staticmethod(lambda *a, **k: None)
+
     txt_target = _TMP / "result.txt"
     QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (str(txt_target), ""))
     try:
@@ -175,6 +180,9 @@ def main() -> int:
     finally:
         QFileDialog.getSaveFileName = orig_save
     check("㉑ 取消另存为时不产生文件", not cancel_target.exists())
+
+    # 恢复被 mock 的弹窗（避免影响后续测试/真实使用）
+    QMessageBox.information = _orig_information
 
     print()
     passed = sum(1 for _, ok, _ in results if ok)

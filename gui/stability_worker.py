@@ -49,8 +49,6 @@ class StabilityWorker(QThread):
     stability_failed = Signal(str)
 
     def __init__(
-        """初始化稳定性复测线程。"""
-
         self,
         entries: Sequence[IPEntry],
         rounds: int,
@@ -64,6 +62,8 @@ class StabilityWorker(QThread):
         download_timeout_ms: int = 10000,
         parent=None,
     ) -> None:
+        """初始化稳定性复测线程。"""
+
         super().__init__(parent)
         self._entries: List[IPEntry] = list(entries)
         self._rounds = max(MIN_ROUNDS, min(int(rounds), MAX_ROUNDS))

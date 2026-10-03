@@ -137,8 +137,6 @@ class Scanner:
     """并发测速控制器。"""
 
     def __init__(
-        """初始化扫描器。"""
-
         self,
         port: int = DEFAULT_PORT,
         concurrency: int = DEFAULT_CONCURRENCY,
@@ -150,6 +148,8 @@ class Scanner:
         download_timeout_ms: int = DEFAULT_DOWNLOAD_TIMEOUT_MS,
         http_host: str = DEFAULT_HTTP_HOST,
     ) -> None:
+        """初始化扫描器。"""
+
         # 第一级：TCP
         self.port = port
         self.concurrency = max(MIN_CONCURRENCY, min(int(concurrency), MAX_CONCURRENCY))
@@ -202,7 +202,8 @@ class Scanner:
         try:
             event.set()
         except Exception:
-            pass
+            # 事件循环已关闭时 set() 会失败；此处只用于唤醒等待线程，失败无害
+            logger.debug("设置停止事件失败（事件循环可能已关闭）", exc_info=True)
 
     @property
     def stop_requested(self) -> bool:

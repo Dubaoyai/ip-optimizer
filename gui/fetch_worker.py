@@ -42,14 +42,14 @@ class FetchWorker(QThread):
     fetch_failed = Signal(str)
 
     def __init__(
-        """初始化自动获取线程。"""
-
         self,
         count: int,
         exclude_ips: Optional[Set[str]] = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         parent=None,
     ) -> None:
+        """初始化自动获取线程。"""
+
         super().__init__(parent)
         # 数量做安全限制，防止用户输入极端数值
         self._count = max(MIN_GENERATE_COUNT, min(int(count), MAX_GENERATE_COUNT))

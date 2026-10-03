@@ -163,4 +163,5 @@ async def tcp_ping(
             try:
                 writer.close()
             except Exception:
-                pass
+                # 关闭连接失败不影响测速结果，仅记录便于排障
+                logger.debug("关闭 HTTP 连接写入端失败（已忽略）", exc_info=True)

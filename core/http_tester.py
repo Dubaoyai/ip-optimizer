@@ -95,7 +95,8 @@ def _parse_status_line(line: bytes) -> Optional[int]:
         if len(parts) >= 2 and parts[0].upper().startswith("HTTP/") and parts[1].isdigit():
             return int(parts[1])
     except Exception:
-        pass
+        # 解析状态行失败属可预期情况（响应异常/被截断），返回 None 由调用方处理
+        logger.debug("解析 HTTP 状态行失败（已忽略）", exc_info=True)
     return None
 
 
@@ -205,7 +206,8 @@ async def http_test(
             try:
                 writer.close()
             except Exception:
-                pass
+                # 关闭连接失败不影响测速结果，仅记录便于排障
+                logger.debug("关闭 HTTP 连接写入端失败（已忽略）", exc_info=True)
 
 
 async def download_test(
@@ -291,7 +293,8 @@ async def download_test(
             try:
                 writer.close()
             except Exception:
-                pass
+                # 关闭连接失败不影响测速结果，仅记录便于排障
+                logger.debug("关闭 HTTP 连接写入端失败（已忽略）", exc_info=True)
 
 
 def format_speed(speed_bps: Optional[float]) -> str:

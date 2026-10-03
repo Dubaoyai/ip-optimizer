@@ -48,8 +48,6 @@ class ScanWorker(QThread):
     scan_failed = Signal(str)
 
     def __init__(
-        """初始化测速线程。"""
-
         self,
         entries: Sequence[IPEntry],
         port: int,
@@ -62,6 +60,8 @@ class ScanWorker(QThread):
         download_timeout_ms: int = DEFAULT_DOWNLOAD_TIMEOUT_MS,
         parent=None,
     ) -> None:
+        """初始化测速线程。"""
+
         super().__init__(parent)
         self._entries: List[IPEntry] = list(entries)
         # 三级测试的参数全部交给 Scanner 统一管理（含范围保护）
