@@ -101,16 +101,41 @@ def main() -> int:
     combo_mode = win.theme_combo.currentData()
     check("⑦ 下拉框显示与实际主题同步", combo_mode == "light", f"下拉框 = {combo_mode}")
 
-    # ---------- 6. 偏好持久化 ----------
+    # ---------- 6. 启动恒为深色（不记忆用户切换） ----------
+    # 产品要求：每次打开都以深色启动。历史版本会记住上次选择，
+    # 导致用户曾切浅色后「默认深色」失效（用户实际反馈过这个问题）。
     win.apply_theme_mode("dark")
     app.processEvents()
-    saved = theme.load_saved_mode()
-    check("⑧ 主题选择已持久化", saved == "dark", f"读回 = {saved}")
+    check("⑧ 启动模式为深色", theme.load_saved_mode() == "dark",
+          f"load_saved_mode() = {theme.load_saved_mode()}")
 
     win.apply_theme_mode("light")
     app.processEvents()
-    saved2 = theme.load_saved_mode()
-    check("⑨ 切换后持久化随之更新", saved2 == "light", f"读回 = {saved2}")
+    check("⑨ 会话内切换不影响下次启动（不记忆）",
+          theme.load_saved_mode() == "dark",
+          f"切到浅色后 load_saved_mode() = {theme.load_saved_mode()}")
+
+    # 模拟盘上残留 light 的旧配置 —— 启动时应被作废为 dark
+    prefs = theme._prefs_path()
+    if prefs is not None:
+        import json as _json
+
+        _backup = prefs.read_text(encoding="utf-8") if prefs.exists() else None
+        prefs.parent.mkdir(parents=True, exist_ok=True)
+        prefs.write_text(
+            _json.dumps({"theme_mode": "light", "keep": "other"}), encoding="utf-8"
+        )
+        theme.discard_legacy_preference()
+        after = _json.loads(prefs.read_text(encoding="utf-8"))
+        check("⑨bis 旧 light 配置被作废为 dark",
+              after.get("theme_mode") == "dark",
+              f"作废后 = {after.get('theme_mode')}")
+        check("⑨ter 作废时保留其他偏好项", after.get("keep") == "other",
+              f"keep = {after.get('keep')}")
+        if _backup is not None:
+            prefs.write_text(_backup, encoding="utf-8")
+        else:
+            prefs.unlink(missing_ok=True)
 
     # ---------- 7. 反复切换稳定性 ----------
     try:

@@ -378,14 +378,14 @@ class MainWindow(QMainWindow):
 
         # ---- 主题切换器（深色 / 浅色 / 跟随系统） ----
         self.theme_combo = QComboBox()
-        self.theme_combo.setToolTip("切换界面主题（默认深色，选择会被记住）")
+        self.theme_combo.setToolTip("切换界面主题（默认深色，仅本次运行内生效）")
         self.theme_combo.setMinimumWidth(104)
         for mode in theme.MODES:
             self.theme_combo.addItem(theme.MODE_LABELS[mode], mode)
-        # 显示「上次保存的选择」，与 main.py 启动时应用的主题保持一致
-        saved_mode = theme.load_saved_mode()
+        # 与 main.py 启动时应用的主题保持一致（默认深色）
+        startup_mode = theme.load_saved_mode()
         default_index = next(
-            (i for i, m in enumerate(theme.MODES) if m == saved_mode), 0
+            (i for i, m in enumerate(theme.MODES) if m == startup_mode), 0
         )
         self.theme_combo.setCurrentIndex(default_index)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_selected)

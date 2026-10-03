@@ -19,6 +19,14 @@ from core import sampler  # noqa: E402
 
 SOURCE_HTML = Path(r"D:\软件\节点工具\优选IP测速_重构版.html")
 
+# ---- 有意偏离原版的项（每条都必须写明理由，否则视为意外失真）----
+# 格式：控件 id -> (默认值, 最小值, 最大值)
+INTENTIONAL_DEVIATIONS: dict[str, tuple[int, int, int]] = {
+    # 超时：原版 800/200/3000 不贴合实际 —— 超过 500ms 才响应的节点已无使用价值，
+    # 放宽上限只会让抽样变慢；默认取 100ms 更贴近"优选"场景。
+    "timeoutSample": (100, 50, 500),
+}
+
 results: list[tuple[str, bool, str]] = []
 
 
@@ -88,6 +96,22 @@ def main() -> int:
         d_ok = getattr(sampler, dname) == int(value)
         l_ok = getattr(sampler, lname) == int(lo)
         h_ok = getattr(sampler, hname) == int(hi)
+
+        # ---- 有意偏离清单（2026-10-03 产品决策）----
+        # 超时的取值范围是**有意改的**：原版 800/200/3000 不贴合实际使用
+        # （超过 500ms 才响应的节点已无使用价值，放宽只会让抽样变慢）。
+        # 这类偏离必须在此显式登记，才不会被当成"意外失真"。
+        if ident in INTENTIONAL_DEVIATIONS:
+            expected = INTENTIONAL_DEVIATIONS[ident]
+            mine = (getattr(sampler, dname), getattr(sampler, lname), getattr(sampler, hname))
+            ok = mine == expected
+            check(
+                f"{ident} 按【有意偏离】生效（{expected[0]}/{expected[1]}/{expected[2]}）",
+                ok,
+                f"我的 {mine[0]}/{mine[1]}/{mine[2]}；原版 {value}/{lo}/{hi}（已登记偏离）",
+            )
+            continue
+
         check(
             f"{ident} 的 value/min/max 一致（{value}/{lo}/{hi}）",
             d_ok and l_ok and h_ok,

@@ -297,10 +297,43 @@ def _prefs_path():
 
 
 def load_saved_mode() -> str:
-    """读取上次保存的主题模式。
+    """读取启动时应使用的主题模式。
+
+    **默认行为 = 深色**（产品要求：每次打开都以深色启动，不受上次切换影响）。
+
+    语义分三种（按优先级）：
+    1. 环境变量 `IPO_FORCE_DARK=1` → 强制深色；
+    2. 环境变量 `IPO_THEME=<mode>`   → 使用该模式（供测试/高级用户）；
+    3. 其余情况                       → **一律返回 DEFAULT_MODE（深色）**。
+
+    说明：早期版本会让用户上次的选择「粘住」并跨启动保留，导致
+    「我明明设了默认深色，打开却是浅色」。现改为**不记忆**，
+    保证每次启动都是深色 —— 用户在会话内的切换仍即时生效，只是不写盘。
 
     Returns:
-        保存的模式（dark/light/system）；文件不存在或解析失败时返回 DEFAULT_MODE。
+        "dark" / "light" / "system"（默认 "dark"）。
+    """
+    import os
+
+    if os.environ.get("IPO_FORCE_DARK", "").strip() not in ("", "0", "false", "False"):
+        return "dark"
+
+    forced = os.environ.get("IPO_THEME", "").strip()
+    if forced in MODES:
+        return forced
+
+    # 不读取历史偏好 —— 保证默认深色
+    return DEFAULT_MODE
+
+
+def load_saved_mode_legacy() -> str:
+    """读取偏好文件里保存的主题（历史行为，仅保留供排查/迁移使用）。
+
+    ⚠️ 普通启动**不要**调用本函数 —— 它会让旧配置覆盖默认深色，
+    这正是「设了默认深色却打开浅色」的成因。
+
+    Returns:
+        偏好文件中的模式；文件不存在/损坏/非法时返回 DEFAULT_MODE。
     """
     path = _prefs_path()
     if path is None or not path.exists():
@@ -312,12 +345,14 @@ def load_saved_mode() -> str:
         mode = data.get("theme_mode")
         return mode if mode in MODES else DEFAULT_MODE
     except Exception:
-        # 偏好文件损坏不应影响启动，静默回退默认值
         return DEFAULT_MODE
 
 
 def save_mode(mode: str) -> None:
     """保存主题模式到偏好文件（失败不抛异常，不影响使用）。
+
+    注意：当前版本**不再用保存值做启动恢复**（启动恒为深色），
+    本函数仅用于记录用户当次选择，便于排查问题。
 
     Args:
         mode: 要保存的模式。
@@ -341,6 +376,38 @@ def save_mode(mode: str) -> None:
     except Exception:
         # 写盘失败（只读目录等）不应阻断主题切换
         pass
+
+
+def discard_legacy_preference(logger=None) -> None:
+    """作废历史遗留的主题偏好（一次性清理）。
+
+    **背景**：旧版本会把用户当次切换的主题写盘并在下次启动沿用。
+    若用户曾切到浅色，之后重新打开就会是浅色 —— 与「默认深色」的
+    产品要求冲突。此函数在启动时把该记录作废，确保首次升级后即恢复深色。
+
+    做法：把 theme_mode 写回 "dark"（保留文件与其他偏好项，不删文件）。
+
+    Args:
+        logger: 可选的 logger，用于记录清理动作。
+    """
+    path = _prefs_path()
+    if path is None or not path.exists():
+        return
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("theme_mode") not in (None, "dark"):
+            data["theme_mode"] = "dark"
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            if logger is not None:
+                logger.info("已作废旧的主题偏好记录，恢复为深色")
+    except Exception:
+        # 清理失败不应影响启动
+        if logger is not None:
+            logger.warning("作废旧主题偏好失败（不影响使用）")
 
 
 # ======================================================================

@@ -54,10 +54,14 @@ def main() -> int:
     app.setApplicationName(APP_TITLE)
     _install_exception_hook(logger)
 
-    # 应用主题：默认深色；若用户上次切换过则沿用上次选择（深色/浅色/跟随系统）
-    saved_mode = theme.load_saved_mode()
-    theme.apply_theme(app, saved_mode)
-    logger.info("主题模式：%s（用户可在界面右上角切换）", saved_mode)
+    # 应用主题：**每次启动固定用深色**（产品要求）。
+    # 早期版本会把用户上次的选择写盘并在下次启动沿用，导致
+    # 「设了默认深色，打开却是浅色」。现在启动恒为深色，
+    # 会话内仍可由右上角下拉框随时切换。
+    theme.discard_legacy_preference(logger)
+    startup_mode = theme.load_saved_mode()
+    theme.apply_theme(app, startup_mode)
+    logger.info("主题模式：%s（右上角可切换；启动恒为深色）", startup_mode)
 
     window = MainWindow()
     window.show()

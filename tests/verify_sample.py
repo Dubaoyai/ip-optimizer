@@ -95,7 +95,7 @@ def main() -> int:
     page.per_cidr_spin.setValue(123)
     page.concurrency_spin.setValue(77)
     page.cidr_edit.setPlainText("104.16.0.0/24")
-    page.timeout_spin.setValue(1500)
+    page.timeout_spin.setValue(450)
     page.keep_n_spin.setValue(7)
     # notify=True 模拟用户勾选端口（默认静默，供配置恢复时使用）
     page.port_selector.set_selected([80, 443, 8443], notify=True)
@@ -108,7 +108,7 @@ def main() -> int:
     check("⑪ 改动即落盘：每段抽样", on_disk.get("per_cidr") == 123,
           f"盘上 {on_disk.get('per_cidr')}")
     check("⑫ 改动即落盘：并发/超时/保留N",
-          on_disk.get("concurrency") == 77 and on_disk.get("timeout") == 1500
+          on_disk.get("concurrency") == 77 and on_disk.get("timeout") == 450
           and on_disk.get("keep_n") == 7,
           f"{on_disk.get('concurrency')}/{on_disk.get('timeout')}/{on_disk.get('keep_n')}")
     check("⑬ 改动即落盘：CIDR", "104.16.0.0/24" in (on_disk.get("cidr") or ""))
@@ -220,12 +220,22 @@ def main() -> int:
     check("㉚ 恢复默认：CIDR", page.cidr_edit.toPlainText().strip() == DEFAULT_CIDRS.strip(),
           f"{page.cidr_count_label.text()}")
     check("㉛ 恢复默认：模板", page.template_edit.toPlainText().strip() == DEFAULT_TEMPLATE.strip())
-    check("㉜ 恢复默认：参数", page.per_cidr_spin.value() == 200
-          and page.concurrency_spin.value() == 30
-          and page.timeout_spin.value() == 800
-          and page.keep_n_spin.value() == 20,
-          f"{page.per_cidr_spin.value()}/{page.concurrency_spin.value()}/"
-          f"{page.timeout_spin.value()}/{page.keep_n_spin.value()}")
+    # 断言直接引用常量，避免改默认值后测试仍写死旧值（此前踩过这个坑）
+    from core.sampler import (
+        DEFAULT_CONCURRENCY,
+        DEFAULT_KEEP_N,
+        DEFAULT_SAMPLE_PER_CIDR,
+        DEFAULT_TIMEOUT_MS as _DEF_TIMEOUT,
+    )
+
+    check("㉜ 恢复默认：参数",
+          page.per_cidr_spin.value() == DEFAULT_SAMPLE_PER_CIDR
+          and page.concurrency_spin.value() == DEFAULT_CONCURRENCY
+          and page.timeout_spin.value() == _DEF_TIMEOUT
+          and page.keep_n_spin.value() == DEFAULT_KEEP_N,
+          f"实际 {page.per_cidr_spin.value()}/{page.concurrency_spin.value()}/"
+          f"{page.timeout_spin.value()}/{page.keep_n_spin.value()}；"
+          f"期望 {DEFAULT_SAMPLE_PER_CIDR}/{DEFAULT_CONCURRENCY}/{_DEF_TIMEOUT}/{DEFAULT_KEEP_N}")
     check("㉝ 恢复默认：端口", page.port_selector.selected_ports() == list(DEFAULT_PORTS),
           str(page.port_selector.selected_ports()))
     check("㉞ 恢复默认：状态提示已更新", "已恢复默认" in page.status_label.text(),
@@ -244,28 +254,28 @@ def main() -> int:
 
     # ---------- 11. 数值越界提示（用户输入 100 被截断时必须告知） ----------
     # 原问题：Qt 的 QSpinBox 静默把越界输入改成边界值，用户以为"值自己变了"
-    page._pending_input["timeout"] = "100"
-    page.timeout_spin.setValue(100)          # 会被截断到下限
+    page._pending_input["timeout"] = "10"
+    page.timeout_spin.setValue(10)           # 会被截断到下限
     page._check_truncation("timeout", page.timeout_spin)
     app.processEvents()
-    check("㊱ 越界输入被截断到下限", page.timeout_spin.value() == 200,
+    check("㊱ 越界输入被截断到下限", page.timeout_spin.value() == 50,
           f"生效 {page.timeout_spin.value()}")
     check("㊲ 越界时给出明确提示", page.range_hint.isVisible()
           and "自动调整" in page.range_hint.text(),
           page.range_hint.text())
     check("㊳ 提示中说明了原始输入与生效值",
-          "100" in page.range_hint.text() and "200" in page.range_hint.text())
+          "10" in page.range_hint.text() and "50" in page.range_hint.text())
 
     # 合法输入时提示应消失
-    page._pending_input["timeout"] = "1500"
-    page.timeout_spin.setValue(1500)
+    page._pending_input["timeout"] = "450"
+    page.timeout_spin.setValue(450)
     page._check_truncation("timeout", page.timeout_spin)
     app.processEvents()
     check("㊴ 合法输入时提示消失", not page.range_hint.isVisible(),
           f"值 {page.timeout_spin.value()}")
 
     # ---------- 12. 自动抽样不得改动用户的参数 ----------
-    page.timeout_spin.setValue(1200)
+    page.timeout_spin.setValue(450)
     page.per_cidr_spin.setValue(150)
     page.concurrency_spin.setValue(45)
     before = (page.timeout_spin.value(), page.per_cidr_spin.value(), page.concurrency_spin.value())
