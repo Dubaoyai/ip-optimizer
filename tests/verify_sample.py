@@ -193,6 +193,55 @@ def main() -> int:
     check("㉗ 清空结果", page.table.rowCount() == 0 and not page._engine.passing)
     check("㉘ 清空后空态提示可见", page.empty_label.isVisible())
 
+    # ---------- 10. 恢复默认（防「配置被改乱/污染后无法还原」） ----------
+    from core.sampler import DEFAULT_CIDRS, DEFAULT_PORTS, DEFAULT_TEMPLATE
+    from PySide6.QtWidgets import QMessageBox as _MB
+
+    # 模拟用户把配置改乱
+    page.cidr_edit.setPlainText("104.16.0.0/24")
+    page.template_edit.setPlainText("vless://uuid@1.2.3.4:8443?x=1")
+    page.per_cidr_spin.setValue(123)
+    page.concurrency_spin.setValue(77)
+    page.keep_n_spin.setValue(1)
+    page.port_selector.set_selected([8443], notify=True)
+    app.processEvents()
+    check("㉙ 配置已改乱（前置条件）",
+          page.cidr_edit.toPlainText().strip() == "104.16.0.0/24")
+
+    # 自动确认二次确认弹窗
+    _orig_question = _MB.question
+    _MB.question = staticmethod(lambda *a, **k: _MB.StandardButton.Yes)
+    try:
+        page._on_reset_defaults()
+    finally:
+        _MB.question = _orig_question
+    app.processEvents()
+
+    check("㉚ 恢复默认：CIDR", page.cidr_edit.toPlainText().strip() == DEFAULT_CIDRS.strip(),
+          f"{page.cidr_count_label.text()}")
+    check("㉛ 恢复默认：模板", page.template_edit.toPlainText().strip() == DEFAULT_TEMPLATE.strip())
+    check("㉜ 恢复默认：参数", page.per_cidr_spin.value() == 200
+          and page.concurrency_spin.value() == 30
+          and page.timeout_spin.value() == 800
+          and page.keep_n_spin.value() == 20,
+          f"{page.per_cidr_spin.value()}/{page.concurrency_spin.value()}/"
+          f"{page.timeout_spin.value()}/{page.keep_n_spin.value()}")
+    check("㉝ 恢复默认：端口", page.port_selector.selected_ports() == list(DEFAULT_PORTS),
+          str(page.port_selector.selected_ports()))
+    check("㉞ 恢复默认：状态提示已更新", "已恢复默认" in page.status_label.text(),
+          page.status_label.text()[:30])
+
+    # 取消时不改动
+    page.cidr_edit.setPlainText("1.2.3.4/24")
+    app.processEvents()
+    _MB.question = staticmethod(lambda *a, **k: _MB.StandardButton.No)
+    try:
+        page._on_reset_defaults()
+    finally:
+        _MB.question = _orig_question
+    check("㉟ 取消确认时不改动配置", page.cidr_edit.toPlainText().strip() == "1.2.3.4/24",
+          page.cidr_edit.toPlainText().strip())
+
     # ---------- 汇总 ----------
     print()
     passed = sum(1 for _, ok, _ in results if ok)

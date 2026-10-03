@@ -142,6 +142,14 @@ class SamplePage(QWidget):
         cidr_head.addStretch(1)
         self.cidr_count_label = widgets.hint_label("0 段", "muted")
         cidr_head.addWidget(self.cidr_count_label)
+        # 恢复默认：把 CIDR / 代理模板 / 全部参数还原为内置原版值
+        self.reset_button = widgets.ghost_button(
+            "恢复默认",
+            "把 CIDR 网段、代理模板与全部参数还原为内置的默认值（会覆盖当前编辑内容）",
+        )
+        self.reset_button.setFixedHeight(24)
+        self.reset_button.clicked.connect(self._on_reset_defaults)
+        cidr_head.addWidget(self.reset_button)
         body.addLayout(cidr_head)
 
         self.cidr_edit = QPlainTextEdit()
@@ -507,6 +515,70 @@ class SamplePage(QWidget):
         self.template_hint.style().polish(self.template_hint)
         self._save_prefs()
 
+    def _on_reset_defaults(self) -> None:
+        """把 CIDR / 代理模板 / 全部参数还原为内置默认值。
+
+        用途：配置被改乱、或被旧版本/测试数据污染时，一键回到可用状态
+        （内置默认值与原版 HTML 工具逐字一致，见 core/sampler.DEFAULT_*）。
+
+        会覆盖用户当前的编辑内容，故先二次确认。
+        """
+        if self._running:
+            QMessageBox.information(self, "提示", "测速运行中，请先停止再恢复默认。")
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "恢复默认设置",
+            "将把以下内容还原为内置默认值：\n\n"
+            f"· CIDR 网段：{len(DEFAULT_CIDRS.splitlines())} 段（含 IPv6）\n"
+            "· 代理模板：内置 vless 模板\n"
+            f"· 参数：每段抽样 {DEFAULT_SAMPLE_PER_CIDR} / 并发 {DEFAULT_CONCURRENCY} / "
+            f"超时 {DEFAULT_TIMEOUT_MS}ms / 保留最优 {DEFAULT_KEEP_N}\n"
+            f"· 探测端口：{', '.join(str(p) for p in DEFAULT_PORTS)}\n"
+            f"· 测速源：{SOURCE_LABELS.get('cloudflare', '')}\n\n"
+            "**当前的编辑内容会被覆盖**，确定继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        # 恢复期间屏蔽信号，避免逐项触发保存（最后统一保存一次）
+        widgets_to_block = (
+            self.cidr_edit, self.template_edit, self.source_combo,
+            self.per_cidr_spin, self.concurrency_spin,
+            self.timeout_spin, self.keep_n_spin,
+        )
+        for w in widgets_to_block:
+            w.blockSignals(True)
+        try:
+            self.cidr_edit.setPlainText(DEFAULT_CIDRS)
+            self.template_edit.setPlainText(DEFAULT_TEMPLATE)
+            self.per_cidr_spin.setValue(DEFAULT_SAMPLE_PER_CIDR)
+            self.concurrency_spin.setValue(DEFAULT_CONCURRENCY)
+            self.timeout_spin.setValue(DEFAULT_TIMEOUT_MS)
+            self.keep_n_spin.setValue(DEFAULT_KEEP_N)
+            cloudflare_index = self.source_combo.findData("cloudflare")
+            if cloudflare_index >= 0:
+                self.source_combo.setCurrentIndex(cloudflare_index)
+        finally:
+            for w in widgets_to_block:
+                w.blockSignals(False)
+
+        self.port_selector.set_selected(DEFAULT_PORTS)
+        # 统一刷新派生显示并落盘
+        self._on_cidr_changed()
+        self._on_template_changed()
+        self._update_stats()
+
+        count = len([ln for ln in DEFAULT_CIDRS.splitlines() if ln.strip()])
+        self.status_label.setObjectName("Success")
+        self.status_label.setText(f"已恢复默认设置：CIDR {count} 段、内置模板与全部参数")
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
+        logger.info("用户恢复了抽样页面的默认设置")
+
     # ==================================================================
     # 测速流程
     # ==================================================================
@@ -653,6 +725,7 @@ class SamplePage(QWidget):
         self.concurrency_spin.setEnabled(not running)
         self.timeout_spin.setEnabled(not running)
         self.keep_n_spin.setEnabled(not running)
+        self.reset_button.setEnabled(not running)
         self.port_selector.set_enabled_ui(not running)
         self._refresh_buttons()
 
