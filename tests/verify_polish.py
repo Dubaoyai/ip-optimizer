@@ -153,96 +153,69 @@ def main() -> int:
           repr(clip_port[:70]))
 
     # ==================== 4. 清空确认三选项 ====================
-    # ⚠ Qt 会按按钮「角色」重排顺序，不可用索引定位；这里按**按钮文本**匹配。
+    # 用 classmethod 包装后，测试只需 mock ClearChoiceDialog.ask 一个方法，
+    # 不再触碰 QMessageBox.exec / clickedButton 等内部细节
+    # （此前 36 处脆弱 mock 导致「一改 UI 就要改一批测试」）。
     sp = win.sample_page
     from core.sampler import ProbeResult
+    from gui.sample_page import ClearChoiceDialog
 
-    def fake_clear(button_keyword: str):
-        """模拟用户点击了含某关键词的按钮；空字符串表示直接关闭对话框。
-
-        Args:
-            button_keyword: 按钮文本关键词；空串代表 pressed=None（关窗口/Esc）。
-        """
-        def _clicked(box):
-            if not button_keyword:
-                return None
-            for b in box.buttons():
-                if button_keyword in b.text():
-                    return b
-            return None
-
-        QMessageBox.exec = lambda self: 0
-        QMessageBox.clickedButton = _clicked
-
-    def reset_mocks() -> None:
-        QMessageBox.exec = orig_exec
-        QMessageBox.clickedButton = orig_clicked
-
-    orig_exec = QMessageBox.exec
-    orig_clicked = QMessageBox.clickedButton
+    _orig_ask = ClearChoiceDialog.ask
 
     def seed() -> None:
-        """重置为「有 2 个结果 + 3 条去重记录」的初始状态。"""
+        """重置为「2 个结果 + 3 条去重记录」。"""
         sp._engine.passing = [
             ProbeResult(ip="1.1.1.1", port=443, ms=30.0, node="n1"),
             ProbeResult(ip="1.1.1.2", port=443, ms=40.0, node="n2"),
         ]
         sp._engine.tested = {"n1", "n2", "n3"}
 
-    # 4.1 关闭对话框（Esc）→ 必须什么都不做
-    seed()
-    fake_clear("")           # 返回 None，模拟关窗口
-    try:
-        sp._on_clear()
-    finally:
-        reset_mocks()
-    check("⑮ 清空-关闭对话框：结果保留", len(sp._engine.passing) == 2,
-          f"{len(sp._engine.passing)} 个")
-    check("⑯ 清空-关闭对话框：去重记录保留", sp._engine.tested_count() == 3,
-          f"{sp._engine.tested_count()} 条")
+    def choose(choice: str) -> None:
+        """模拟用户在清空对话框里做出某种选择。"""
+        ClearChoiceDialog.ask = classmethod(
+            lambda cls, c, t, parent=None, _c=choice: _c
+        )
 
-    # 4.2 点「取消」
-    seed()
-    fake_clear("取消")
     try:
-        sp._on_clear()
-    finally:
-        reset_mocks()
-    check("⑯bis 清空-点取消：数据不变",
-          len(sp._engine.passing) == 2 and sp._engine.tested_count() == 3)
+        # 4.1 取消（含 Esc / 关窗口）
+        seed(); choose(ClearChoiceDialog.CANCEL); sp._on_clear()
+        check("⑮ 清空-取消：结果保留", len(sp._engine.passing) == 2,
+              f"{len(sp._engine.passing)} 个")
+        check("⑯ 清空-取消：去重记录保留", sp._engine.tested_count() == 3,
+              f"{sp._engine.tested_count()} 条")
 
-    # 4.3 只清结果 → 保留去重记录
-    seed()
-    fake_clear("只清结果")
-    try:
-        sp._on_clear()
-    finally:
-        reset_mocks()
-    check("⑰ 只清结果：结果清空", len(sp._engine.passing) == 0)
-    check("⑱ 只清结果：去重记录仍保留", sp._engine.tested_count() == 3,
-          f"{sp._engine.tested_count()} 条")
+        # 4.2 只清结果
+        seed(); choose(ClearChoiceDialog.KEEP); sp._on_clear()
+        check("⑰ 只清结果：结果清空", len(sp._engine.passing) == 0)
+        check("⑱ 只清结果：去重记录仍保留", sp._engine.tested_count() == 3,
+              f"{sp._engine.tested_count()} 条")
 
-    # 4.4 完全重置 → 都清
-    seed()
-    fake_clear("完全重置")
-    try:
-        sp._on_clear()
+        # 4.3 完全重置
+        seed(); choose(ClearChoiceDialog.FULL); sp._on_clear()
+        check("⑲ 完全重置：结果与去重记录都清空",
+              len(sp._engine.passing) == 0 and sp._engine.tested_count() == 0)
+
+        # 4.4 未知返回值 → 视为取消，绝不误删
+        seed(); choose("something-weird"); sp._on_clear()
+        check("⑲bis 未知返回值按取消处理（防误删）",
+              len(sp._engine.passing) == 2 and sp._engine.tested_count() == 3)
     finally:
-        reset_mocks()
-    check("⑲ 完全重置：结果与去重记录都清空",
-          len(sp._engine.passing) == 0 and sp._engine.tested_count() == 0)
+        ClearChoiceDialog.ask = _orig_ask
 
     # 4.5 空数据时不弹窗
     sp._engine.passing = []
     sp._engine.tested = set()
-    called = {"n": 0}
-    QMessageBox.exec = lambda self: called.__setitem__("n", called["n"] + 1)
+    asked = {"n": 0}
+    ClearChoiceDialog.ask = classmethod(
+        lambda cls, c, t, parent=None: asked.__setitem__("n", asked["n"] + 1) or cls.CANCEL
+    )
     try:
         sp._on_clear()
     finally:
-        QMessageBox.exec = orig_exec
-    check("⑳ 无数据时不打扰用户（不弹窗）", called["n"] == 0, f"弹窗 {called['n']} 次")
+        ClearChoiceDialog.ask = _orig_ask
+    check("⑳ 无数据时不打扰用户（不弹窗）", asked["n"] == 0, f"弹窗 {asked['n']} 次")
 
+    # ---------- 汇总 ----------
     print()
     passed = sum(1 for _, ok, _ in results if ok)
     total_n = len(results)

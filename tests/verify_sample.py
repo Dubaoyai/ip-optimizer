@@ -196,26 +196,17 @@ def main() -> int:
     check("㉖ 复制最优 N 条", clip3 == "vless://u@1.1.1.1:443", repr(clip3))
 
     # ---------- 9. 清空 ----------
-    # 清空现在有二次确认弹窗（三选项），测试需 mock 掉，否则会阻塞在真实模态框上
-    from PySide6.QtWidgets import QMessageBox as _MB2
+    # 用 classmethod 包装后只需 mock 一个方法（此前要 mock exec/clickedButton）
+    from gui.sample_page import ClearChoiceDialog
 
-    _orig_exec2 = _MB2.exec
-    _orig_clicked2 = _MB2.clickedButton
-
-    def _click_full(box):
-        """模拟点击「完全重置」。"""
-        for b in box.buttons():
-            if "完全重置" in b.text():
-                return b
-        return None
-
-    _MB2.exec = lambda self: 0
-    _MB2.clickedButton = _click_full
+    _orig_ask = ClearChoiceDialog.ask
+    ClearChoiceDialog.ask = classmethod(
+        lambda cls, c, t, parent=None: cls.FULL
+    )
     try:
         page._on_clear()
     finally:
-        _MB2.exec = _orig_exec2
-        _MB2.clickedButton = _orig_clicked2
+        ClearChoiceDialog.ask = _orig_ask
     app.processEvents()
     check("㉗ 清空结果", page.table.rowCount() == 0 and not page._engine.passing)
     check("㉘ 清空后空态提示可见", page.empty_label.isVisible())

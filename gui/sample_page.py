@@ -97,6 +97,56 @@ RESULTS_FILE = "sample_results.json"
 HEADERS = ("#", "IP", "端口", "延迟", "代理节点")
 
 
+class ClearChoiceDialog:
+    """「清空结果」的三选项确认框。
+
+    设计要点（参见 pytest-qt 官方关于模态对话框的建议）：
+    把对话框的创建与结果判定**收敛到一个 classmethod**，业务代码只拿返回值。
+    这样测试只需 `monkeypatch.setattr(ClearChoiceDialog, "ask", ...)`，
+    不必 mock QMessageBox 的 exec/clickedButton 等内部细节 ——
+    后者会让测试与 Qt 实现耦合，一改 UI 就要改一批测试。
+    """
+
+    KEEP = "keep"       # 只清结果（保留去重记录）
+    FULL = "full"       # 完全重置（含去重记录）
+    CANCEL = "cancel"   # 取消（含关闭窗口 / Esc）
+
+    @classmethod
+    def ask(cls, passing_count: int, tested_count: int, parent=None) -> str:
+        """弹出确认框并返回用户选择。
+
+        Args:
+            passing_count: 当前可用节点数。
+            tested_count: 当前已测记录数。
+            parent: 父控件。
+
+        Returns:
+            ClearChoiceDialog.KEEP / FULL / CANCEL。
+            **关闭窗口或按 Esc 一律返回 CANCEL**（绝不误判为执行清空）。
+        """
+        box = QMessageBox(parent)
+        box.setWindowTitle("清空结果")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            f"当前有 {passing_count} 个可用节点、{tested_count} 条已测记录。\n\n"
+            "请选择清空方式："
+        )
+        keep_btn = box.addButton("只清结果（保留去重记录）", QMessageBox.ButtonRole.AcceptRole)
+        full_btn = box.addButton("完全重置（含去重记录）", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is keep_btn:
+            return cls.KEEP
+        if clicked is full_btn:
+            return cls.FULL
+        # cancel_btn 或 None（Esc / 关闭窗口）都按取消处理
+        _ = cancel_btn
+        return cls.CANCEL
+
+
 class SamplePage(QWidget):
     """抽样测速页面：CIDR 抽样 → 并发测速 → 生成可用节点。"""
 
@@ -1001,6 +1051,10 @@ class SamplePage(QWidget):
         用户可选择粒度：
         - 只清结果（保留去重记录，避免重复测同一批 IP）；
         - 完全重置（结果与去测记录一起清）。
+
+        对话框交互全部收敛在 `ClearChoiceDialog.ask()` 里 —— 测试只需 mock
+        那一个 classmethod，不必触碰 QMessageBox 内部细节
+        （参见 pytest-qt 关于模态对话框的官方建议）。
         """
         if self._running:
             QMessageBox.information(self, "提示", "测速运行中，请先停止再清空。")
@@ -1013,39 +1067,26 @@ class SamplePage(QWidget):
             self.status_label.setText("当前没有结果，无需清空")
             return
 
-        box = QMessageBox(self)
-        box.setWindowTitle("清空结果")
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setText(
-            f"当前有 {count} 个可用节点、{tested} 条已测记录。\n\n请选择清空方式："
-        )
-        keep_btn = box.addButton("只清结果（保留去重记录）", QMessageBox.ButtonRole.AcceptRole)
-        full_btn = box.addButton("完全重置（含去重记录）", QMessageBox.ButtonRole.DestructiveRole)
-        cancel_btn = box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(keep_btn)
-        box.exec()
+        choice = ClearChoiceDialog.ask(count, tested, self)
 
-        clicked = box.clickedButton()
-        # ⚠ 关键：用户按 Esc / 点关闭窗口时 clickedButton() 返回 None，
-        # 必须与「完全重置」区分开 —— 否则关掉对话框反而会清空数据（数据丢失级缺陷）。
-        if clicked is None or clicked is cancel_btn:
+        if choice == "cancel":
             logger.info("用户取消了清空操作")
             return
 
-        if clicked is keep_btn:
+        if choice == "keep":
             # 只清结果：保留 tested 集合，重新抽样时不会重复测同一批 IP
             self._engine.passing = []
             self._engine.candidates = []
             self._engine._stop_flag = False
             action_text = "已清空结果（保留了去重记录，重抽不会重复测同一批 IP）"
             logger.info("用户清空了结果（保留去重记录 %s 条）", tested)
-        elif clicked is full_btn:
+        elif choice == "full":
             self._engine.clear()
             action_text = "已完全重置：结果与去重记录均已清空"
             logger.info("用户完全重置了抽样数据")
         else:
-            # 兜底：未知按钮一律视为取消，绝不误删数据
-            logger.warning("清空对话框返回了未知按钮，按取消处理")
+            # 兜底：未知返回值一律视为取消，绝不误删数据
+            logger.warning("清空对话框返回未知值 %r，按取消处理", choice)
             return
 
         self.table.setRowCount(0)

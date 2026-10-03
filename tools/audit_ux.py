@@ -105,10 +105,19 @@ def main() -> int:
     print("\n【3】危险操作（清空/重置类）确认机制")
     src = (ROOT / "gui" / "sample_page.py").read_text(encoding="utf-8")
     if "_on_clear" in src:
-        seg = src.split("def _on_clear")[1][:600]
-        has_confirm = "question" in seg
+        # 取到下一个 def 为止（而非固定字符数），避免截断导致漏判
+        seg_raw = src.split("def _on_clear")[1]
+        next_def = seg_raw.find("\n    def ")
+        seg = seg_raw[:next_def] if next_def > 0 else seg_raw[:2000]
+        has_confirm = "QMessageBox(self)" in seg and "addButton" in seg
         print(f"  抽样页「清空结果」有二次确认：{has_confirm}")
-        if not has_confirm:
+        if has_confirm:
+            # 进一步确认「关闭对话框」不会被误判为清空
+            safe_close = "clicked is None" in seg
+            print(f"    └ 关闭对话框（Esc）安全处理：{safe_close}")
+            if not safe_close:
+                add("高", "抽样页-清空", "关闭对话框可能被误判为执行清空（数据丢失风险）")
+        else:
             add("中", "抽样页-清空结果", "清空是破坏性操作，但无二次确认（误点即丢结果）")
     main_src = (ROOT / "gui" / "main_window.py").read_text(encoding="utf-8")
     print(f"  主窗口「关闭」有确认（测速中）：{'question' in main_src}")
@@ -146,10 +155,13 @@ def main() -> int:
     app.processEvents()
     tbl = win.result_table
     cols = [tbl.horizontalHeaderItem(i).text() for i in range(tbl.columnCount())]
-    print(f"  结果表列数：{len(cols)}")
+    visible = tbl.visible_columns_count()
+    print(f"  结果表总列数：{len(cols)}，默认可见：{visible}")
     print(f"  列名：{cols}")
-    if len(cols) > 12:
-        add("中", "结果表格", f"{len(cols)} 列超出常见屏宽，横向滚动才能看全（建议分组或默认隐藏次要列）")
+    if visible > 12:
+        add("中", "结果表格", f"默认显示 {visible} 列，超出常见屏宽（建议分组或默认隐藏次要列）")
+    else:
+        print(f"  ✓ 默认只显示 {visible} 个核心列，无需横向滚动")
     # 关键列是否靠前
     key_cols = ["排名", "IP", "延迟", "综合评分"]
     positions = [cols.index(c) for c in key_cols if c in cols]
