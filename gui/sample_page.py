@@ -168,6 +168,11 @@ class SamplePage(QWidget):
         body.addWidget(self.template_edit)
         self.template_hint = widgets.hint_label("模板需包含 @IP:端口 片段，测速后自动替换", "muted")
         body.addWidget(self.template_hint)
+        # 与原版一致的说明：让用户知道改动会自动保存（原版文案：
+        # 「模板与网段修改后自动保存，刷新自动恢复」）
+        body.addWidget(widgets.hint_label(
+            "ⓘ 模板与网段、参数修改后会自动保存，下次打开自动恢复", "muted"
+        ))
 
         # ---- 测速源 ----
         body.addWidget(widgets.hint_label("测速源", "secondary"))
