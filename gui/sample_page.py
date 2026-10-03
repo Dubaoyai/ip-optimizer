@@ -33,7 +33,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPlainTextEdit,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -190,7 +191,9 @@ class SamplePage(QWidget):
         # 取值范围逐字对齐原 HTML：min=10 max=2000 value=200
         self.per_cidr_spin.setRange(SAMPLE_PER_CIDR_MIN, SAMPLE_PER_CIDR_MAX)
         self.per_cidr_spin.setValue(DEFAULT_SAMPLE_PER_CIDR)
-        self.per_cidr_spin.setToolTip("每个 CIDR 网段随机抽取多少个 IP 参与测速")
+        self.per_cidr_spin.setToolTip(
+            f"每个 CIDR 网段随机抽取多少个 IP 参与测速（{SAMPLE_PER_CIDR_MIN}-{SAMPLE_PER_CIDR_MAX}）"
+        )
         grid.addWidget(self.per_cidr_spin, 1, 0)
 
         grid.addWidget(widgets.hint_label("并发数", "muted"), 0, 1)
@@ -198,7 +201,9 @@ class SamplePage(QWidget):
         # 对齐原版：min=1 max=100 value=30
         self.concurrency_spin.setRange(CONCURRENCY_MIN, CONCURRENCY_MAX)
         self.concurrency_spin.setValue(DEFAULT_CONCURRENCY)
-        self.concurrency_spin.setToolTip("同时探测多少个 IP（越大越快，对网络压力也越大）")
+        self.concurrency_spin.setToolTip(
+            f"同时探测多少个 IP（{CONCURRENCY_MIN}-{CONCURRENCY_MAX}，越大越快，对网络压力也越大）"
+        )
         grid.addWidget(self.concurrency_spin, 1, 1)
 
         grid.addWidget(widgets.hint_label("超时(ms)", "muted"), 2, 0)
@@ -207,6 +212,10 @@ class SamplePage(QWidget):
         self.timeout_spin.setRange(TIMEOUT_MIN_MS, TIMEOUT_MAX_MS)
         self.timeout_spin.setValue(DEFAULT_TIMEOUT_MS)
         self.timeout_spin.setSingleStep(100)
+        self.timeout_spin.setToolTip(
+            f"单个 IP 的探测超时（{TIMEOUT_MIN_MS}-{TIMEOUT_MAX_MS} ms）；"
+            "超出范围会自动调整到边界值"
+        )
         grid.addWidget(self.timeout_spin, 3, 0)
 
         grid.addWidget(widgets.hint_label("保留最优N", "muted"), 2, 1)
@@ -214,10 +223,36 @@ class SamplePage(QWidget):
         # 对齐原版：min=1 max=300 value=20
         self.keep_n_spin.setRange(KEEP_N_MIN, KEEP_N_MAX)
         self.keep_n_spin.setValue(DEFAULT_KEEP_N)
-        self.keep_n_spin.setToolTip("「一键复制最优N条」复制多少条")
+        self.keep_n_spin.setToolTip(
+            f"「一键复制最优N条」复制多少条（{KEEP_N_MIN}-{KEEP_N_MAX}）"
+        )
         grid.addWidget(self.keep_n_spin, 3, 1)
 
+        # 四个数值框统一挂「超范围提示」：用户输入越界值时明确告知被调整到多少
+        # （Qt 的 QSpinBox 会静默截断，此前无任何反馈，容易被误解为"值自己变了"）
+        self._value_hints: Dict[str, QLabel] = {}
+        self._pending_input: Dict[str, str] = {}
+        for key, spin in (
+            ("per_cidr", self.per_cidr_spin),
+            ("concurrency", self.concurrency_spin),
+            ("timeout", self.timeout_spin),
+            ("keep_n", self.keep_n_spin),
+        ):
+            # textEdited 只在**用户手输**时发出（程序 setValue 不触发），
+            # 记下用户真正输入的文本，供编辑完成时判断是否被范围截断
+            spin.lineEdit().textEdited.connect(
+                lambda t, k=key: self._pending_input.__setitem__(k, t)
+            )
+            spin.editingFinished.connect(
+                lambda k=key, s=spin: self._check_truncation(k, s)
+            )
+
         body.addLayout(grid)
+
+        # 数值范围提示行（默认隐藏，仅在有输入被调整时显示）
+        self.range_hint = widgets.hint_label("", "warning")
+        self.range_hint.setVisible(False)
+        body.addWidget(self.range_hint)
 
         # 数值参数变化时同样保存（此前只有 CIDR/模板/端口 有保存，参数改了不落盘）
         self.per_cidr_spin.valueChanged.connect(self._save_prefs)
@@ -257,8 +292,12 @@ class SamplePage(QWidget):
     # 右栏：结果
     # ------------------------------------------------------------------
     def _build_result_panel(self) -> QWidget:
-        """构建右侧结果面板。"""
-        panel = widgets.Panel("优选排名", "抽样测速")
+        """构建右侧结果面板。
+
+        expand=True：让结果表格吃掉面板的全部剩余高度（此前表格只占内容高度，
+        下方留一大片空白，浪费了可用空间）。
+        """
+        panel = widgets.Panel("优选排名", "抽样测速", expand=True)
         body = panel.body_layout
 
         # ---- 四个统计卡 ----
@@ -327,14 +366,33 @@ class SamplePage(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        # 给表格一个最小高度，保证空表时也占据面板的主要区域（避免下方大片留白）
+        self.table.setMinimumHeight(280)
+        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         body.addWidget(self.table, 1)
 
-        # 空态提示
+        # 空态提示：叠在表格上方居中显示，不额外占一行高度
         self.empty_label = widgets.hint_label("暂无结果 —— 点击左侧【抽样测速】开始", "muted")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        body.addWidget(self.empty_label)
+        self.empty_label.setParent(self.table)
+        self.empty_label.setGeometry(0, 0, 0, 0)   # 实际位置由 resize 事件确定
+        self.table.installEventFilter(self)
 
         return panel
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt 规定命名)
+        """让空态提示始终居中覆盖在结果表格上。
+
+        Args:
+            obj: 事件目标。
+            event: 事件对象。
+
+        Returns:
+            False（不拦截事件）。
+        """
+        if obj is self.table and event.type() == QEvent.Type.Resize:
+            self.empty_label.setGeometry(0, 0, self.table.width(), self.table.height())
+        return False
 
     # ==================================================================
     # 偏好与结果持久化（对应原版 localStorage）
@@ -359,6 +417,41 @@ class SamplePage(QWidget):
         if override:
             return Path(override)
         return data_root() / RESULTS_FILE
+
+    def _check_truncation(self, key: str, spin) -> None:
+        """检查用户手输的值是否被范围截断，并明确告知。
+
+        Qt 的 QSpinBox 在输入越界值时会**静默**改成边界值，用户会以为
+        「我设的值自己变了」。这里把该行为显式化。
+
+        Args:
+            key: 参数标识（per_cidr / concurrency / timeout / keep_n）。
+            spin: 对应的 QSpinBox。
+        """
+        labels = {
+            "per_cidr": "每段抽样",
+            "concurrency": "并发数",
+            "timeout": "超时",
+            "keep_n": "保留最优N",
+        }
+        typed = self._pending_input.pop(key, "")
+        if not typed.strip():
+            return
+        try:
+            typed_value = int(typed.strip())
+        except ValueError:
+            return
+
+        actual = spin.value()
+        if typed_value != actual:
+            lo, hi = spin.minimum(), spin.maximum()
+            self.range_hint.setText(
+                f"「{labels.get(key, key)}」超出允许范围 {lo}-{hi}，"
+                f"输入 {typed_value} 已自动调整为 **{actual}**"
+            )
+            self.range_hint.setVisible(True)
+        else:
+            self.range_hint.setVisible(False)
 
     def _load_prefs(self) -> None:
         """读取上次的配置（不存在时用默认值）。

@@ -242,6 +242,51 @@ def main() -> int:
     check("㉟ 取消确认时不改动配置", page.cidr_edit.toPlainText().strip() == "1.2.3.4/24",
           page.cidr_edit.toPlainText().strip())
 
+    # ---------- 11. 数值越界提示（用户输入 100 被截断时必须告知） ----------
+    # 原问题：Qt 的 QSpinBox 静默把越界输入改成边界值，用户以为"值自己变了"
+    page._pending_input["timeout"] = "100"
+    page.timeout_spin.setValue(100)          # 会被截断到下限
+    page._check_truncation("timeout", page.timeout_spin)
+    app.processEvents()
+    check("㊱ 越界输入被截断到下限", page.timeout_spin.value() == 200,
+          f"生效 {page.timeout_spin.value()}")
+    check("㊲ 越界时给出明确提示", page.range_hint.isVisible()
+          and "自动调整" in page.range_hint.text(),
+          page.range_hint.text())
+    check("㊳ 提示中说明了原始输入与生效值",
+          "100" in page.range_hint.text() and "200" in page.range_hint.text())
+
+    # 合法输入时提示应消失
+    page._pending_input["timeout"] = "1500"
+    page.timeout_spin.setValue(1500)
+    page._check_truncation("timeout", page.timeout_spin)
+    app.processEvents()
+    check("㊴ 合法输入时提示消失", not page.range_hint.isVisible(),
+          f"值 {page.timeout_spin.value()}")
+
+    # ---------- 12. 自动抽样不得改动用户的参数 ----------
+    page.timeout_spin.setValue(1200)
+    page.per_cidr_spin.setValue(150)
+    page.concurrency_spin.setValue(45)
+    before = (page.timeout_spin.value(), page.per_cidr_spin.value(), page.concurrency_spin.value())
+    worker = page._build_worker(auto=True)     # 构建 worker（只读参数）
+    after = (page.timeout_spin.value(), page.per_cidr_spin.value(), page.concurrency_spin.value())
+    check("㊵ 构建自动抽样任务不改动用户参数", before == after,
+          f"{before} -> {after}")
+    if worker is not None:
+        worker.deleteLater()
+
+    # ---------- 13. 结果区必须撑满可用高度 ----------
+    win.resize(1440, 960)
+    win._switch_view("sample")
+    app.processEvents()
+    app.processEvents()
+    table_h = page.table.height()
+    panel_h = page.table.parent().height()
+    check("㊶ 结果表格占据面板主要高度（撑满）",
+          table_h >= 300 and table_h >= panel_h * 0.55,
+          f"表格 {table_h}px / 面板 {panel_h}px")
+
     # ---------- 汇总 ----------
     print()
     passed = sum(1 for _, ok, _ in results if ok)

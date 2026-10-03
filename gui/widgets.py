@@ -169,6 +169,7 @@ class Panel(QWidget):
         title: str,
         subtitle: str = "",
         parent: Optional[QWidget] = None,
+        expand: bool = False,
     ) -> None:
         """初始化面板。
 
@@ -176,6 +177,8 @@ class Panel(QWidget):
             title: 面板标题。
             subtitle: 标题右侧的灰色说明文字（可空）。
             parent: 父控件。
+            expand: 内容区是否撑满面板剩余高度。True 用于「结果表格」这类
+                    需要占满可用空间的场景；False（默认）保持内容自身的自然高度。
         """
         super().__init__(parent)
         self.setObjectName("Card")
@@ -224,8 +227,11 @@ class Panel(QWidget):
         self.body_layout = QVBoxLayout(self.body)
         self.body_layout.setContentsMargins(0, 0, 0, 0)
         self.body_layout.setSpacing(10)
-        outer.addWidget(self.body)
-        outer.addStretch(0)
+        # expand=True 时让内容区吃掉剩余高度（结果表格需要占满）；
+        # 否则保留末尾弹簧，让面板按内容自然高度收缩。
+        outer.addWidget(self.body, 1 if expand else 0)
+        if not expand:
+            outer.addStretch(0)
 
     def add_action(self, widget: QWidget) -> None:
         """往面板头右侧添加一个控件（通常是按钮）。
