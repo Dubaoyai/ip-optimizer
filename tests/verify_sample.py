@@ -65,6 +65,14 @@ def main() -> int:
     check("② 可切换到抽样测速页", page.isVisible())
     check("③ 侧边栏有对应导航按钮", "sample" in win._nav_buttons)
 
+    # 侧边栏顺序：工作台 → 稳定性复测 → 测试结果 → 抽样测速
+    order = list(win._nav_buttons.keys())
+    check("③bis 侧边栏顺序符合工作流",
+          order == ["workbench", "stability", "results", "sample"],
+          f"实际 {order}")
+    check("③ter 稳定性复测在测试结果之前",
+          order.index("stability") < order.index("results"))
+
     # ---------- 2. 默认配置加载 ----------
     check("④ 默认 CIDR 已载入", len(page.cidr_edit.toPlainText().strip()) > 0,
           f"{page.cidr_count_label.text()}")

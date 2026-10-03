@@ -191,17 +191,17 @@ class MainWindow(QMainWindow):
         root.addWidget(right, 1)
         self.setCentralWidget(central)
 
-        # 构建三个视图的页面容器
+        # 构建视图页面容器（顺序与侧边栏导航一致：工作台 → 稳定性复测 → 测试结果 → 抽样测速）
         self._build_stat_cards()
         self._pages: Dict[str, QWidget] = {}
         self._pages["workbench"] = self._build_workbench_page()
-        self._pages["results"] = self._build_results_page()
         self._pages["stability"] = self._build_stability_page()
+        self._pages["results"] = self._build_results_page()
         # 第四视图：抽样测速（移植自《优选IP测速_重构版.html》）
         self.sample_page = SamplePage()
         self._pages["sample"] = self.sample_page
 
-        # 把三个页面都加进内容区，靠显示/隐藏切换
+        # 把页面都加进内容区，靠显示/隐藏切换
         for page in self._pages.values():
             self._content_layout.addWidget(page)
         self._content_layout.addStretch(1)
@@ -256,10 +256,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(nav_label)
 
         self._nav_buttons: Dict[str, widgets.NavButton] = {}
+        # 顺序按使用流程排列：先测速 → 再复测取稳定 → 再看排名结果 → 抽样生成节点
         nav_items = (
             ("workbench", "工作台", "▶"),
-            ("results", "测试结果", "▤"),
             ("stability", "稳定性复测", "◈"),
+            ("results", "测试结果", "▤"),
             ("sample", "抽样测速", "◇"),
         )
         for key, text, icon in nav_items:
