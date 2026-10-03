@@ -49,6 +49,8 @@ class StabilityWorker(QThread):
     stability_failed = Signal(str)
 
     def __init__(
+        """初始化稳定性复测线程。"""
+
         self,
         entries: Sequence[IPEntry],
         rounds: int,
@@ -175,6 +177,8 @@ class StabilityWorker(QThread):
 
     @property
     def rounds(self) -> int:
+        """已完成的复测轮数。"""
+
         return self._rounds
 
 

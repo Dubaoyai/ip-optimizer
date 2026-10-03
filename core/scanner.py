@@ -137,6 +137,8 @@ class Scanner:
     """并发测速控制器。"""
 
     def __init__(
+        """初始化扫描器。"""
+
         self,
         port: int = DEFAULT_PORT,
         concurrency: int = DEFAULT_CONCURRENCY,
@@ -204,6 +206,8 @@ class Scanner:
 
     @property
     def stop_requested(self) -> bool:
+        """是否已请求停止测速。"""
+
         return self._stop_requested
 
     def _is_stopped(self) -> bool:

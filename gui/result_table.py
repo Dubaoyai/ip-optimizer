@@ -48,6 +48,8 @@ class _NumberItem(QTableWidgetItem):
     """
 
     def __init__(self, text: str, value: float) -> None:
+        """初始化数值单元格。"""
+
         super().__init__(text)
         self.setData(Qt.ItemDataRole.UserRole, value)
         self.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -144,6 +146,8 @@ class ResultTable(QTableWidget):
     )
 
     def __init__(self, parent=None) -> None:
+        """初始化结果表格。"""
+
         super().__init__(0, len(self.HEADERS), parent)
         self.setHorizontalHeaderLabels(list(self.HEADERS))
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)      # 只读

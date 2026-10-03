@@ -57,6 +57,8 @@ class IPPanel(QGroupBox):
     fetch_failed = Signal(str)
 
     def __init__(self, parent=None) -> None:
+        """初始化 IP 来源面板。"""
+
         super().__init__("IP 来源", parent)
 
         self._ip_file_path: str = ""        # 当前选择的文件路径

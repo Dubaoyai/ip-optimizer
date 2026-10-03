@@ -66,44 +66,64 @@ class StabilityData:
     # ---- 成功率 ----
     @property
     def tcp_success_rate(self) -> float:
+        """TCP 成功率（0-100）；无数据时为 None。"""
+
         return self.tcp_success / self.tcp_total if self.tcp_total else 0.0
 
     @property
     def http_success_rate(self) -> float:
+        """HTTP 成功率（0-100）；无数据时为 None。"""
+
         return self.http_success / self.http_total if self.http_total else 0.0
 
     @property
     def download_success_rate(self) -> float:
+        """下载成功率（0-100）；无数据时为 None。"""
+
         return self.download_success / self.download_total if self.download_total else 0.0
 
     # ---- 延迟 / 速度统计 ----
     @property
     def avg_tcp_latency(self):
+        """TCP 延迟平均值（毫秒）；无数据时为 None。"""
+
         return sum(self.tcp_latencies) / len(self.tcp_latencies) if self.tcp_latencies else None
 
     @property
     def min_tcp_latency(self):
+        """TCP 延迟最小值（毫秒）；无数据时为 None。"""
+
         return min(self.tcp_latencies) if self.tcp_latencies else None
 
     @property
     def max_tcp_latency(self):
+        """TCP 延迟最大值（毫秒）；无数据时为 None。"""
+
         return max(self.tcp_latencies) if self.tcp_latencies else None
 
     @property
     def avg_http_latency(self):
+        """HTTP 延迟平均值（毫秒）；无数据时为 None。"""
+
         return sum(self.http_latencies) / len(self.http_latencies) if self.http_latencies else None
 
     @property
     def avg_download_speed(self):
+        """下载速度平均值（字节/秒）；无数据时为 None。"""
+
         return sum(self.download_speeds) / len(self.download_speeds) if self.download_speeds else None
 
     # ---- 波动（变异系数）----
     @property
     def tcp_cv(self):
+        """TCP 延迟变异系数（越小越稳定）；数据不足时为 None。"""
+
         return _cv(self.tcp_latencies)
 
     @property
     def speed_cv(self):
+        """下载速度变异系数（越小越稳定）；数据不足时为 None。"""
+
         return _cv(self.download_speeds)
 
     # ---- 汇总 ----
@@ -114,10 +134,14 @@ class StabilityData:
 
     @property
     def total_success(self) -> int:
+        """各阶段成功次数合计。"""
+
         return self.tcp_success + self.http_success + self.download_success
 
     @property
     def total_failed(self) -> int:
+        """各阶段失败次数合计。"""
+
         return self.total_tests - self.total_success
 
 

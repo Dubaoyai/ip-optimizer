@@ -42,6 +42,8 @@ class FetchWorker(QThread):
     fetch_failed = Signal(str)
 
     def __init__(
+        """初始化自动获取线程。"""
+
         self,
         count: int,
         exclude_ips: Optional[Set[str]] = None,
@@ -113,6 +115,8 @@ class TestConnectionWorker(QThread):
     test_finished = Signal(object)
 
     def __init__(self, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS, parent=None) -> None:
+        """初始化连接测试线程。"""
+
         super().__init__(parent)
         self._timeout_seconds = timeout_seconds
 

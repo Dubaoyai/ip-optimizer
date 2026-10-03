@@ -55,6 +55,8 @@ class FetchSettingsDialog(QDialog):
     test_requested = Signal()
 
     def __init__(self, parent=None) -> None:
+        """初始化获取设置对话框。"""
+
         super().__init__(parent)
         self.setWindowTitle("自动获取 Cloudflare IP")
         self.setMinimumWidth(430)

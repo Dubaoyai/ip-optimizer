@@ -57,10 +57,14 @@ class ValidationResult:
 
     @property
     def valid_count(self) -> int:
+        """有效 IP 数量。"""
+
         return len(self.valid)
 
     @property
     def invalid_count(self) -> int:
+        """无效 IP 数量。"""
+
         return len(self.invalid)
 
 

@@ -48,6 +48,8 @@ class ScanWorker(QThread):
     scan_failed = Signal(str)
 
     def __init__(
+        """初始化测速线程。"""
+
         self,
         entries: Sequence[IPEntry],
         port: int,
