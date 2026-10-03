@@ -109,6 +109,113 @@ def export_csv(entries: Sequence[RankEntry]) -> Path:
 
 
 # ======================================================================
+# 节点链接导出（把优选 IP 套进用户自己的代理模板）
+# ======================================================================
+
+def build_nodes_from_entries(
+    entries: Sequence[RankEntry],
+    template: str,
+    top_n: int = 100,
+) -> List[str]:
+    """把测速排名结果套进代理模板，生成可用节点链接。
+
+    与「抽样测速」页共用同一套模板机制（core.sampler）：
+    模板中的 `@IP:端口` 会被替换成该条结果的 IP 与实际端口。
+
+    Args:
+        entries: 排名结果（build_ranking 的返回值）。
+        template: 代理模板，必须含 `@IP:端口` 片段。
+        top_n: 最多生成多少条。
+
+    Returns:
+        节点链接列表（按传入顺序，即排名顺序）。
+
+    Raises:
+        ExportError: 模板缺少 `@IP:端口` 片段。
+    """
+    from core.sampler import build_node, extract_template_port
+
+    parsed = extract_template_port(template)
+    if parsed is None:
+        raise ExportError(
+            "代理模板中未找到 @IP:端口 格式，无法生成节点。\n\n"
+            "示例：vless://uuid@1.2.3.4:443?encryption=none&security=none&type=ws"
+        )
+    _, pair = parsed
+
+    nodes: List[str] = []
+    for entry in entries:
+        if entry.score is None:
+            continue          # 只导出可评分的（测速成功的）
+        if len(nodes) >= top_n:
+            break
+        result = entry.result
+        nodes.append(build_node(template, result.ip, result.port, pair))
+    return nodes
+
+
+def export_nodes(
+    entries: Sequence[RankEntry],
+    template: str,
+    top_n: int = 100,
+    target: Optional[Path] = None,
+) -> Path:
+    """导出节点链接到 txt。
+
+    Args:
+        entries: 排名结果。
+        template: 代理模板。
+        top_n: 最多导出条数。
+        target: 指定保存路径（用户在「另存为」对话框里选的）；
+                为 None 时自动存到 output\\ 目录。
+
+    Returns:
+        实际写入的文件路径。
+
+    Raises:
+        ExportError: 模板非法或没有可导出的结果或写盘失败。
+    """
+    nodes = build_nodes_from_entries(entries, template, top_n)
+    if not nodes:
+        raise ExportError("没有可导出的节点，请先完成测速（需有测速成功的 IP）")
+
+    if target is None:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target = OUTPUT_DIR / f"优选节点_TOP{top_n}_{stamp}.txt"
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(nodes) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise ExportError(f"写入节点文件失败：{exc}") from exc
+    logger.info("节点导出成功：%s（%s 条）", target, len(nodes))
+    return target
+
+
+def export_plain_text(content: str, target: Path) -> Path:
+    """把一段文本写入指定路径（供「另存为」使用）。
+
+    Args:
+        content: 要写入的文本内容。
+        target: 目标文件路径。
+
+    Returns:
+        实际写入的路径。
+
+    Raises:
+        ExportError: 写盘失败。
+    """
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        raise ExportError(f"写入文件失败：{exc}") from exc
+    logger.info("文件导出成功：%s", target)
+    return target
+
+
+# ======================================================================
 # V1.4：稳定性复测结果的导出
 # ======================================================================
 STABLE_CSV_HEADERS = (

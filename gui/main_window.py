@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, QTimer
@@ -22,10 +24,12 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -73,11 +77,14 @@ from gui.stability_worker import StabilityWorker  # V1.4：稳定性复测线程
 from utils.export import (
     ExportError,
     export_csv,
+    export_nodes,
+    export_plain_text,
     export_stable_csv,
     export_stable_txt,
     export_txt,
 )
 from utils.logger import get_logger
+from utils.paths import data_root
 
 logger: logging.Logger = get_logger()
 
@@ -353,6 +360,20 @@ class MainWindow(QMainWindow):
         self.page_title.setText(title)
         self.page_subtitle.setText(subtitle)
         self._active_view = key
+
+        # 切到结果页时同步一次空态提示与按钮可用性
+        # （否则「还没有测速结果」的提示可能在有数据时仍残留）
+        if key == "results":
+            self._sync_result_empty_state()
+
+    def _sync_result_empty_state(self) -> None:
+        """按当前是否有排名数据，同步结果页的空态提示与按钮可用性。"""
+        if not hasattr(self, "result_empty_hint"):
+            return
+        entries = self.result_table.rank_entries
+        self.result_empty_hint.setVisible(not entries)
+        # 有数据时启用复制/导出（含节点按钮）
+        self._set_export_buttons_enabled(bool(entries))
 
     # ------------------------------------------------------------------
     # 顶栏
@@ -860,6 +881,30 @@ class MainWindow(QMainWindow):
         self.result_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.result_empty_hint)
 
+        # ---- 代理模板（把优选 IP 直接变成可用节点链接） ----
+        template_row = QHBoxLayout()
+        template_row.setSpacing(8)
+        template_label = QLabel("代理模板：")
+        template_label.setObjectName("Secondary")
+        template_row.addWidget(template_label)
+        self.result_template_edit = QLineEdit()
+        self.result_template_edit.setPlaceholderText(
+            "粘贴你的节点模板，含 @IP:端口 即可自动替换（例如 vless://uuid@1.2.3.4:443?type=ws&host=你的域名）"
+        )
+        self.result_template_edit.setToolTip(
+            "测速得到的优选 IP 会替换掉模板里的 @IP:端口，生成可直接导入 V2RayN 的节点链接"
+        )
+        self.result_template_edit.textChanged.connect(self._on_result_template_changed)
+        template_row.addWidget(self.result_template_edit, 1)
+        layout.addLayout(template_row)
+
+        # 模板状态提示（未填时说明用途，填了则显示识别结果）
+        self.result_template_hint = widgets.hint_label(
+            "提示：填入模板后即可「复制节点」或「导出节点」，把优选 IP 变成可直接使用的节点链接",
+            "muted",
+        )
+        layout.addWidget(self.result_template_hint)
+
         # ---- V1.3 新增：复制与导出按钮行 ----
         button_layout = QHBoxLayout()
         self.copy_top10_button = QPushButton("复制TOP10")
@@ -870,8 +915,8 @@ class MainWindow(QMainWindow):
         for n, button in ((10, self.copy_top10_button), (50, self.copy_top50_button), (100, self.copy_top100_button)):
             button.setToolTip(f"复制前 {n} 名 IP（每行一个，不带其他文字）")
             button.clicked.connect(lambda _checked=False, count=n: self._copy_top(count))
-        self.export_txt_button.setToolTip("导出 TOP100 的 IP 列表到 output\\ 目录（每行一个 IP）")
-        self.export_csv_button.setToolTip("导出完整结果（含排名/延迟/状态/评分）到 output\\ 目录")
+        self.export_txt_button.setToolTip("导出 TOP100 的 IP 列表（会弹出保存位置选择）")
+        self.export_csv_button.setToolTip("导出完整结果（含排名/延迟/状态/评分），会弹出保存位置选择")
         self.export_txt_button.clicked.connect(self._on_export_txt)
         self.export_csv_button.clicked.connect(self._on_export_csv)
         for button in (
@@ -883,12 +928,129 @@ class MainWindow(QMainWindow):
         button_layout.addStretch(1)
         layout.addLayout(button_layout)
 
+        # ---- 节点操作行（依赖代理模板） ----
+        node_layout = QHBoxLayout()
+        node_layout.setSpacing(8)
+        self.copy_nodes_button = widgets.primary_button(
+            "复制节点", "把优选 IP 套进模板生成节点链接，复制到剪贴板（可直接在 V2RayN 从剪贴板导入）"
+        )
+        self.copy_nodes_button.clicked.connect(self._on_copy_nodes)
+        self.export_nodes_button = widgets.ghost_button(
+            "导出节点", "把节点链接保存为 txt（会弹出保存位置选择）"
+        )
+        self.export_nodes_button.clicked.connect(self._on_export_nodes)
+        for button in (self.copy_nodes_button, self.export_nodes_button):
+            button.setEnabled(False)  # 测速结束后才有数据
+            node_layout.addWidget(button)
+        node_layout.addStretch(1)
+        layout.addLayout(node_layout)
+
         self.result_summary_label = QLabel("")
         self.result_summary_label.setObjectName("Secondary")
         self.result_summary_label.setWordWrap(True)
         layout.addWidget(self.result_summary_label)
 
         return group
+
+    def _on_result_template_changed(self) -> None:
+        """结果页模板变化：校验并给出即时反馈。"""
+        from core.sampler import extract_template_port
+
+        text = self.result_template_edit.text()
+        if not text.strip():
+            self.result_template_hint.setObjectName("Muted")
+            self.result_template_hint.setText(
+                "提示：填入模板后即可「复制节点」或「导出节点」，把优选 IP 变成可直接使用的节点链接"
+            )
+        else:
+            parsed = extract_template_port(text)
+            if parsed:
+                self.result_template_hint.setObjectName("Success")
+                self.result_template_hint.setText(
+                    f"已识别端点：@{'{ip}'}:{parsed[0]}（导出时会替换为优选 IP 与实测端口）"
+                )
+            else:
+                self.result_template_hint.setObjectName("Warning")
+                self.result_template_hint.setText(
+                    "⚠ 模板中未找到 @IP:端口 格式，无法生成节点"
+                )
+        self.result_template_hint.style().unpolish(self.result_template_hint)
+        self.result_template_hint.style().polish(self.result_template_hint)
+
+    def _result_nodes(self) -> List[str]:
+        """按当前模板与排名生成节点链接列表。"""
+        from utils.export import ExportError, build_nodes_from_entries
+
+        template = self.result_template_edit.text().strip()
+        if not template:
+            return []
+        try:
+            return build_nodes_from_entries(
+                self.result_table.rank_entries, template, top_n=DEFAULT_TOP_N
+            )
+        except ExportError:
+            return []
+
+    def _on_copy_nodes(self) -> None:
+        """复制节点链接到剪贴板。"""
+        if not self.result_template_edit.text().strip():
+            QMessageBox.information(
+                self, "请先填写代理模板",
+                "要生成节点链接，需要先在上方「代理模板」里填入你自己的节点模板。\n\n"
+                "模板需包含 @IP:端口 片段，例如：\n"
+                "vless://你的UUID@1.2.3.4:443?encryption=none&security=none&type=ws&host=你的域名",
+            )
+            return
+        nodes = self._result_nodes()
+        if not nodes:
+            QMessageBox.information(
+                self, "没有可导出的节点",
+                "当前没有测速成功的 IP，请先完成测速；或检查代理模板是否含 @IP:端口。",
+            )
+            return
+        QApplication.clipboard().setText("\n".join(nodes))
+        self._set_status(f"已复制 {len(nodes)} 条节点到剪贴板，可在 V2RayN 从剪贴板导入", "success")
+        logger.info("用户复制节点：%s 条", len(nodes))
+
+    def _on_export_nodes(self) -> None:
+        """导出节点链接（弹出另存为对话框）。"""
+        if not self.result_template_edit.text().strip():
+            QMessageBox.information(
+                self, "请先填写代理模板",
+                "要导出节点链接，需要先在上方「代理模板」里填入你自己的节点模板。",
+            )
+            return
+        nodes = self._result_nodes()
+        if not nodes:
+            QMessageBox.information(
+                self, "没有可导出的节点",
+                "当前没有测速成功的 IP，请先完成测速；或检查代理模板是否含 @IP:端口。",
+            )
+            return
+
+        default_path = str(
+            data_root() / "output" / f"优选节点_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存节点链接", default_path, "文本文件 (*.txt);;所有文件 (*.*)"
+        )
+        if not path:
+            return
+        try:
+            from utils.export import export_nodes
+
+            saved = export_nodes(
+                self.result_table.rank_entries,
+                self.result_template_edit.text().strip(),
+                top_n=DEFAULT_TOP_N,
+                target=Path(path),
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "导出失败", str(exc))
+            logger.error("导出节点失败：%s", exc)
+            return
+        self._set_status(f"已导出 {len(nodes)} 条节点到 {saved}", "success")
+        QMessageBox.information(self, "导出成功", f"已导出 {len(nodes)} 条节点：\n{saved}")
 
     def _copy_top(self, count: int) -> None:
         """复制前 N 名 IP 到剪贴板（每行一个，不带其他文字）。
@@ -907,30 +1069,88 @@ class MainWindow(QMainWindow):
     def _on_export_txt(self) -> None:
         """导出 TXT（V1.3 排名 TOP100，每行一个 IP）。
 
+        会先弹出「另存为」让用户选保存位置；不选则取消。
+
         V1.4：想要「按最终排名（稳定者优先）」的列表请用稳定性区域的
         【导出稳定TOP TXT】按钮（见 _on_export_stable_txt）。
         """
+        entries = self.result_table.rank_entries
+        valid = [e for e in entries if e.score is not None]
+        if not valid:
+            QMessageBox.information(self, "没有可导出的内容", "请先完成测速。")
+            return
+
+        content = "\n".join(e.result.ip for e in valid[:DEFAULT_TOP_N]) + "\n"
+        default_path = str(
+            data_root() / "output" / f"IP优选_TOP{DEFAULT_TOP_N}_{datetime.now():%Y%m%d_%H%M%S}.txt"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存 IP 列表", default_path, "文本文件 (*.txt);;所有文件 (*.*)"
+        )
+        if not path:
+            return
         try:
-            path = export_txt(self.result_table.rank_entries, top_n=DEFAULT_TOP_N)
+            saved = export_plain_text(content, Path(path))
         except ExportError as exc:
             QMessageBox.warning(self, "导出失败", str(exc))
             return
-        QMessageBox.information(self, "导出成功", f"TOP TXT 已保存到：\n{path}")
-        logger.info("用户导出 TOP TXT：%s", path)
+        self._set_status(f"已导出 TOP{DEFAULT_TOP_N} IP 列表到 {saved}", "success")
+        QMessageBox.information(self, "导出成功", f"TOP TXT 已保存到：\n{saved}")
+        logger.info("用户导出 TOP TXT：%s", saved)
 
     def _on_export_csv(self) -> None:
         """导出 CSV（V1.3 完整字段）。
 
+        会先弹出「另存为」让用户选保存位置；不选则取消。
+
         V1.4：想要含稳定性/最终评分的完整统计请用稳定性区域的
         【导出稳定性CSV】按钮（见 _on_export_stable_csv）。
         """
-        try:
-            path = export_csv(self.result_table.rank_entries)
-        except ExportError as exc:
-            QMessageBox.warning(self, "导出失败", str(exc))
+        entries = self.result_table.rank_entries
+        if not entries:
+            QMessageBox.information(self, "没有可导出的内容", "请先完成测速。")
             return
-        QMessageBox.information(self, "导出成功", f"CSV 已保存到：\n{path}")
-        logger.info("用户导出 CSV：%s", path)
+
+        default_path = str(
+            data_root() / "output" / f"IP优选_结果_{datetime.now():%Y%m%d_%H%M%S}.csv"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存测速结果", default_path, "CSV 文件 (*.csv);;所有文件 (*.*)"
+        )
+        if not path:
+            return
+        try:
+            # CSV 写入走 export_csv 的字段逻辑，落到用户选定路径
+            import csv as _csv
+
+            from utils.export import CSV_HEADERS
+
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("w", newline="", encoding="utf-8-sig") as fh:
+                writer = _csv.writer(fh)
+                writer.writerow(CSV_HEADERS)
+                for entry in entries:
+                    result = entry.result
+                    rank_text = str(entry.rank) if entry.rank > 0 else ""
+                    writer.writerow([
+                        rank_text,
+                        result.ip,
+                        result.port,
+                        result.latency if result.latency is not None else "",
+                        result.http_status if result.http_status is not None else "",
+                        result.http_latency if result.http_latency is not None else "",
+                        f"{(result.download_speed_bps or 0) / 1048576:.3f}"
+                        if result.download_speed_bps else "",
+                        entry.score if entry.score is not None else "",
+                        result.error or ("成功" if result.success else "失败"),
+                    ])
+        except (OSError, ImportError) as exc:
+            QMessageBox.warning(self, "导出失败", f"写入 CSV 失败：{exc}")
+            return
+        self._set_status(f"已导出 {len(entries)} 行结果到 {target}", "success")
+        QMessageBox.information(self, "导出成功", f"CSV 已保存到：\n{target}")
+        logger.info("用户导出 CSV：%s", target)
 
     # ------------------------------------------------------------------
     # V1.3：评分 / 排名 / 筛选 / 摘要
@@ -997,10 +1217,11 @@ class MainWindow(QMainWindow):
         self.result_summary_label.setText("　|　".join(parts))
 
     def _set_export_buttons_enabled(self, enabled: bool) -> None:
-        """测速结束后才允许复制/导出。"""
+        """测速结束后才允许复制/导出（含节点相关按钮）。"""
         for button in (
             self.copy_top10_button, self.copy_top50_button, self.copy_top100_button,
             self.export_txt_button, self.export_csv_button,
+            self.copy_nodes_button, self.export_nodes_button,
         ):
             button.setEnabled(enabled)
 
