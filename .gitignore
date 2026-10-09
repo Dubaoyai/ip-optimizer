@@ -24,4 +24,11 @@ Thumbs.db
 # PyInstaller 打包产物（不要提交进仓库，发布时作为 Release 附件上传）
 dist/
 build/
+
+# ⚠️ .spec 例外说明（2026-10-09 修正）
+# 原先这里有一条 `*.spec`，把**所有** spec 都挡在仓库外 —— 后果是：
+# 从 GitHub 拉下源码的人**无法复现打包**（README 16.6 承诺的「自己打包」落空），
+# 因为本项目用的是**定制 spec**（排除几十个无用 Qt 模块），不是一行命令能替代的。
+# 现改为：只忽略 PyInstaller 自动生成的临时 spec，显式保留项目自带的那一份。
 *.spec
+!IP-Optimizer.spec

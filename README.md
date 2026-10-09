@@ -1305,16 +1305,59 @@ PyInstaller 单文件 exe 会被少数杀软（尤其 360、部分企业终端�
 
 如果你不放心，**最可靠的做法是自己打包**——源码全开放，可以逐行审计。
 
-### 16.6 自己打包（三条命令）
+### 16.6 自己打包（一条命令）
+
+**推荐：直接双击项目根目录的 `build.bat`** —— 它会自动检查 Python / PySide6 / PyInstaller
+（缺什么装什么），然后调用项目自带的 `IP-Optimizer.spec` 完成打包。
+
+```bash
+build.bat
+```
+
+或手动执行：
 
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install pyinstaller
-python -m PyInstaller --noconfirm --onefile --windowed --name IP-Optimizer-V1.4.2 --exclude-module tkinter main.py
+python -m PyInstaller --noconfirm --clean IP-Optimizer.spec
 ```
 
-打包结果在 `dist\IP-Optimizer-V1.4.2.exe`。
-`build\` 目录是中间产物，可以删掉；`dist\`、`build\`、`*.spec` 已被 `.gitignore` 忽略。
+打包结果在 `dist\IP-Optimizer-V1.5.exe`。
+
+#### 16.6.1 为什么要用 `IP-Optimizer.spec` 而不是一行命令
+
+项目只用到 PySide6 的 3 个模块（`QtCore` / `QtGui` / `QtWidgets`），
+但 PyInstaller 默认会把整个 PySide6 站点目录扫进去。实测（2026-10-09）
+PySide6 可执行件合计 **424.5 MB**，其中：
+
+| 大件 | 体积 | 本项目是否需要 |
+|:--|--:|:--|
+| `Qt6WebEngineCore.dll` | 194.0 MB | ❌ 内嵌浏览器，本项目是原生界面 |
+| `opengl32sw.dll` | 19.7 MB | ❌ 软件 OpenGL 回退，无 3D 绘制 |
+| `avcodec-61.dll` | 13.4 MB | ❌ 音视频编解码，无媒体功能 |
+
+`IP-Optimizer.spec` 里逐项排除了这些无用模块，**exe 体积从 43.3 MB 降到 26.5 MB**。
+
+> ⚠️ **注意：`excludes` 挡不住 DLL 依赖链**。仅靠 `excludes` 时，
+> `opengl32sw.dll`（7.31 MB）、`Qt6Quick.dll`（2.75 MB）、`Qt6Pdf.dll`（2.35 MB）
+> 等仍会被 Qt hook 按二进制依赖关系收进包里。spec 中因此额外做了一次
+> **二进制后置过滤**（`_slim_binaries`）—— **这才是瘦身真正生效的关键**。
+
+#### 16.6.2 打包产物是**完全独立**的
+
+`dist\IP-Optimizer-V1.5.exe` 是**单文件免安装**程序：
+
+- 拷到**任意目录**（桌面 / U 盘 / 移动硬盘）都能直接运行；
+- **不需要项目里的任何其它文件** —— 删掉整个项目文件夹照样能用；
+- 首次启动需自解压，约 2～5 秒；
+- 运行后在 **exe 同级目录**自动创建 `logs\` 与 `output\`；
+  若 exe 放在 `C:\Program Files\` 这类不可写目录，会自动改用
+  `%LOCALAPPDATA%\IPOptimizer\`。
+
+`build\` 是中间产物，可以删。`dist\`、`build\` 已被 `.gitignore` 忽略；
+但 **`IP-Optimizer.spec` 与 `build.bat` 已纳入版本管理** ——
+任何人从仓库拉下源码都能复现同样的打包结果。
+
 
 ### 16.7 打包版常见问题速查
 
