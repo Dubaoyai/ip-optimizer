@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QRect, Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QFont
+from PySide6.QtGui import QCloseEvent, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -196,6 +196,32 @@ class MainWindow(QMainWindow):
         self.title_bar.maximize_requested.connect(self._toggle_maximized)
         self.title_bar.close_requested.connect(self.close)
         outer.addWidget(self.title_bar)
+
+        # ---- 侧边栏收缩按钮（V1.5）
+        # 为什么放标题栏最左而不是顶栏：
+        #   顶栏在**右侧内容区内部**，x=0 是侧边栏右沿（240px），
+        #   按钮会被挤到中间（实测 x=260）—— 不符合「侧栏开关在窗口最左」的预期；
+        #   标题栏横跨全宽，x=0 就是窗口最左边缘。
+        #
+        # ⚠️ 2026-10-09 用户反馈「功能导航还是没有实现隐藏功能」——
+        #   实测根因：初版按钮 28x28、图标色 TEXT_MUTED(#6a6a6a)，
+        #   在深色顶栏上只有 28 个像素点可见，**用户根本找不到入口**。
+        #   教训：功能做了但入口看不见 = 等于没做。故同时做三处增强：
+        #   ① 尺寸 28→34（更易点中）② 色提到 TEXT_SECONDARY + 加边框（对比度足够）
+        #   ③ 图标用 ☰（通用「侧栏开关」语义）
+        self.sidebar_toggle_button = QPushButton("☰")
+        self.sidebar_toggle_button.setObjectName("SidebarToggle")
+        self.sidebar_toggle_button.setFixedSize(34, 28)
+        self.sidebar_toggle_button.setToolTip("收起左侧栏（Ctrl+B）")
+        self.sidebar_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sidebar_toggle_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.sidebar_toggle_button.clicked.connect(self._on_toggle_sidebar)
+        self.title_bar.left_slot.addWidget(self.sidebar_toggle_button)
+
+        # Ctrl+B 快捷键：这是编辑器里「切换侧栏」的通用键位，
+        # 即使按钮被用户忽略，也能用键盘打开（多一条发现路径）
+        self._sidebar_shortcut = QShortcut(QKeySequence("Ctrl+B"), self)
+        self._sidebar_shortcut.activated.connect(self._on_toggle_sidebar)
 
         body = QWidget()
         root = QHBoxLayout(body)
@@ -379,11 +405,10 @@ class MainWindow(QMainWindow):
                 anim.setEndValue(target)
                 anim.start()
 
-        # 同步按钮图标与提示（▶ 表示可展开 / ◀ 表示可收起）
+        # 同步按钮提示（图标恒为 ☰，语义靠提示文字表达）
         if hasattr(self, "sidebar_toggle_button"):
-            self.sidebar_toggle_button.setText("▶" if not expanded else "◀")
             self.sidebar_toggle_button.setToolTip(
-                "展开左侧栏" if not expanded else "收起左侧栏"
+                "展开左侧栏（Ctrl+B）" if not expanded else "收起左侧栏（Ctrl+B）"
             )
         logger.info("侧边栏%s", "展开" if expanded else "收起")
 
@@ -491,16 +516,9 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 10, 20, 10)
         layout.setSpacing(10)
 
-        # ---- 侧边栏收缩按钮（V1.5，放在顶栏而非侧边栏内） ----
-        # 为什么放这里：侧边栏收起后自身不可见，按钮若在侧边栏内将无法再展开。
-        self.sidebar_toggle_button = QPushButton("◀")
-        self.sidebar_toggle_button.setObjectName("SidebarToggle")
-        self.sidebar_toggle_button.setFixedSize(28, 28)
-        self.sidebar_toggle_button.setToolTip("收起左侧栏")
-        self.sidebar_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sidebar_toggle_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.sidebar_toggle_button.clicked.connect(self._on_toggle_sidebar)
-        layout.addWidget(self.sidebar_toggle_button)
+        # 侧边栏收缩按钮**不在这里** —— 它放在标题栏最左侧
+        # （顶栏位于右侧内容区内部，x=0 是侧栏右沿，按钮会被挤到中间）。
+        # 见 _build_ui 中的 self.title_bar.left_slot 部分。
 
         text_box = QVBoxLayout()
         text_box.setSpacing(2)

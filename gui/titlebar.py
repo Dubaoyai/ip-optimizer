@@ -120,8 +120,19 @@ class CustomTitleBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QHBoxLayout(self)
-        # 左边距 14px：与侧边栏内容区对齐观感；右侧 0 让按钮贴边（符合 Windows 习惯）
-        layout.setContentsMargins(14, 0, 0, 0)
+        # 左边距 8px（为最左侧的侧栏切换按钮留贴边位置）；
+        # 右侧 0 让窗口控制按钮贴边（符合 Windows 习惯）
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # ---- 左侧插槽：供主窗口放入「侧栏切换」等全局按钮 ----
+        # 为什么放标题栏而不放顶栏：顶栏位于**右侧内容区内部**，
+        # 其 x=0 是侧边栏右沿（240px），按钮会被挤到中间；
+        # 而标题栏横跨全宽，x=0 就是窗口最左边缘（这才是用户预期的位置）。
+        self.left_slot = QHBoxLayout()
+        self.left_slot.setContentsMargins(0, 0, 0, 0)
+        self.left_slot.setSpacing(4)
+        layout.addLayout(self.left_slot)
         layout.setSpacing(0)
 
         self.title_label = QLabel(title)

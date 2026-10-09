@@ -558,18 +558,22 @@ QWidget#TopBar {{
     background-color: {c('BG_PRIMARY')};
     border-bottom: 1px solid {c('BORDER')};
 }}
-/* 侧边栏收缩按钮（V1.5）：低调的幽灵按钮，不抢页面标题的视觉重心 */
+/* 侧边栏收缩按钮（V1.5）
+   ⚠️ 初版用 TEXT_MUTED(#6a6a6a) 且无边框 —— 实测在深色顶栏上只有 28 个
+   像素点可见，用户反馈「找不到、以为功能没实现」。现提高到 TEXT_SECONDARY
+   并加一圈淡边框，使其成为「看得见的入口」而不是「猜得到的角落」。 */
 QPushButton#SidebarToggle {{
-    background-color: transparent;
-    color: {c('TEXT_MUTED')};
-    border: none;
+    background-color: {c('BG_CARD')};
+    color: {c('TEXT_SECONDARY')};
+    border: 1px solid {c('BORDER')};
     border-radius: {RADIUS_SM}px;
-    font-size: 12px;
+    font-size: 15px;
     padding: 0px;
 }}
 QPushButton#SidebarToggle:hover {{
     background-color: {c('BG_BUTTON_HOVER')};
     color: {c('TEXT_PRIMARY')};
+    border-color: {c('BORDER_LIGHT')};
 }}
 QPushButton#SidebarToggle:pressed {{
     background-color: {c('BG_BUTTON_PRESSED')};

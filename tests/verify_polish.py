@@ -303,22 +303,29 @@ def main() -> int:
         toggle.click()
         app.processEvents()
         check("㉒ 点击按钮后侧边栏收起", side.width() == 0, f"{side.width()}")
-        check("㉓ 收起后按钮变为展开图标", toggle.text() == "▶", repr(toggle.text()))
 
         # 6.3 按钮必须仍在可见区（否则收起后无法再展开 —— 经典坑）
-        check("㉔ 收起后切换按钮仍可见（能再展开）", toggle.isVisible())
+        check("㉓ 收起后切换按钮仍可见（能再展开）", toggle.isVisible())
+        # 且必须在**窗口最左侧**（用户预期位置；曾误放在顶栏导致被挤到 x=260）
+        btn_x = toggle.mapTo(win, toggle.rect().topLeft()).x()
+        check("㉔ 切换按钮位于窗口最左（x < 40）", btn_x < 40, f"x={btn_x}")
 
-        # 6.4 再点 → 展开，且宽度必须精确回到 240（防「卡在内容自然宽度」）
+        # 6.4 按钮必须有足够对比度（曾因颜色过淡导致用户找不到入口）
+        check("㉕ 切换按钮尺寸足够可点（≥32x26）",
+              toggle.width() >= 32 and toggle.height() >= 26,
+              f"{toggle.width()}x{toggle.height()}")
+
+        # 6.5 再点 → 展开，且宽度必须精确回到 240（防「卡在内容自然宽度」）
         toggle.click()
         app.processEvents()
-        check("㉕ 再次点击后完全展开（min/max 同步）",
+        check("㉖ 再次点击后完全展开（min/max 同步）",
               side.width() == theme.SIDEBAR_WIDTH,
               f"{side.width()} (期望 {theme.SIDEBAR_WIDTH})")
 
-        # 6.5 展开标志与按钮状态一致
-        check("㉖ 展开标志与按钮文字一致",
-              win._sidebar_expanded and toggle.text() == "◀",
-              f"expanded={win._sidebar_expanded} text={toggle.text()!r}")
+        # 6.6 展开标志与提示文字一致
+        check("㉗ 展开标志与提示文字一致",
+              win._sidebar_expanded and "收起" in toggle.toolTip(),
+              f"expanded={win._sidebar_expanded} tip={toggle.toolTip()!r}")
     finally:
         theme.SIDEBAR_ANIM_MS = _orig_anim
 
