@@ -79,12 +79,34 @@ def export_txt(entries: Sequence[RankEntry], top_n: int = 100) -> Path:
     return path
 
 
-def export_csv(entries: Sequence[RankEntry]) -> Path:
-    """导出 CSV：完整字段，utf-8-sig 编码（Excel 直接打开不乱码）。"""
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def export_csv(
+    entries: Sequence[RankEntry],
+    target: Optional[Path] = None,
+    filename_prefix: str = "IP优选_结果",
+) -> Path:
+    """导出 CSV：完整字段，utf-8-sig 编码（Excel 直接打开不乱码）。
+
+    Args:
+        entries: 要导出的排名条目。**可以是任意子集** —— 调用方自行切片后传入，
+            本函数不做排名或截断，导出内容与传入顺序一一对应。
+        target: 指定保存路径（用户在「另存为」对话框里选的）；
+            为 None 时自动存到 output\\ 目录。
+        filename_prefix: 自动命名时的文件名前缀（如「IP优选_选中」）。
+
+    Returns:
+        实际写入的文件路径。
+
+    Raises:
+        ExportError: 写盘失败。
+    """
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = OUTPUT_DIR / f"IP优选_结果_{stamp}.csv"
+    if target is None:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        path = OUTPUT_DIR / f"{filename_prefix}_{stamp}.csv"
+    else:
+        path = target
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="", encoding="utf-8-sig") as fh:
             writer = csv.writer(fh)
             writer.writerow(CSV_HEADERS)
@@ -248,12 +270,32 @@ def export_stable_txt(final_entries: Sequence, top_n: int = 100) -> Path:
     return path
 
 
-def export_stable_csv(final_entries: Sequence) -> Path:
-    """导出稳定性复测结果 CSV：V1.4 的完整统计字段。"""
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def export_stable_csv(
+    final_entries: Sequence,
+    target: Optional[Path] = None,
+    filename_prefix: str = "IP优选_稳定性结果",
+) -> Path:
+    """导出稳定性复测结果 CSV：V1.4 的完整统计字段。
+
+    Args:
+        final_entries: 最终排名条目，**可以是任意子集**。
+        target: 指定保存路径；为 None 时自动存到 output\\ 目录。
+        filename_prefix: 自动命名时的文件名前缀。
+
+    Returns:
+        实际写入的文件路径。
+
+    Raises:
+        ExportError: 写盘失败。
+    """
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = OUTPUT_DIR / f"IP优选_稳定性结果_{stamp}.csv"
+    if target is None:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        path = OUTPUT_DIR / f"{filename_prefix}_{stamp}.csv"
+    else:
+        path = target
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="", encoding="utf-8-sig") as fh:
             writer = csv.writer(fh)
             writer.writerow(STABLE_CSV_HEADERS)

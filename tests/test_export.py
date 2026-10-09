@@ -132,5 +132,73 @@ class TestCsvExport(TempOutputDirTest):
         self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
 
 
+class TestCsvSubsetExport(TempOutputDirTest):
+    """CSV 子集导出（2026-10-09 新增：导出选中行）。
+
+    背景：此前 export_csv 不接受任何子集参数，用户挑出几行只能
+    全量导出再手工删 —— 这是「导出结果处理不方便」的机器可证根因。
+    """
+
+    def _ranking(self, count: int = 5):
+        results = [make_result(f"104.16.0.{i}", tcp_ms=50 + i) for i in range(1, count + 1)]
+        return build_ranking(results, top_n=None)
+
+    def test_subset_exports_only_given_entries(self) -> None:
+        """传入子集时，只导出该子集，不夹带其它行。"""
+        ranking = self._ranking(5)
+        subset = [ranking[0], ranking[2]]  # 挑第 1、3 条
+        path = export_csv(subset)
+
+        with path.open(encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh))
+        self.assertEqual(len(rows), 3)  # 表头 + 2 行
+        self.assertEqual(rows[1][1], "104.16.0.1")
+        self.assertEqual(rows[2][1], "104.16.0.3")
+
+    def test_subset_preserves_given_order(self) -> None:
+        """导出顺序 == 传入顺序（不重排、不按排名排序）。"""
+        ranking = self._ranking(5)
+        reversed_subset = list(reversed(ranking))
+        path = export_csv(reversed_subset)
+
+        with path.open(encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh))
+        ip_column = [row[1] for row in rows[1:]]
+        self.assertEqual(ip_column, ["104.16.0.5", "104.16.0.4", "104.16.0.3",
+                                     "104.16.0.2", "104.16.0.1"])
+
+    def test_target_path_respected(self) -> None:
+        """指定 target 时写到该路径，而不是自动命名到 output/。"""
+        ranking = self._ranking(3)
+        target = Path(self._tmp.name) / "自定义" / "选中结果.csv"
+        path = export_csv(ranking[:1], target=target)
+
+        self.assertEqual(path, target)
+        self.assertTrue(target.exists())
+
+    def test_filename_prefix_used_when_auto_naming(self) -> None:
+        """不指定 target 时，用 filename_prefix 生成文件名。"""
+        ranking = self._ranking(2)
+        path = export_csv(ranking, filename_prefix="IP优选_选中")
+        self.assertTrue(path.name.startswith("IP优选_选中_"))
+        self.assertTrue(path.name.endswith(".csv"))
+
+    def test_single_entry_subset(self) -> None:
+        """只选 1 行也能正常导出（边界：最小子集）。"""
+        ranking = self._ranking(3)
+        path = export_csv(ranking[1:2])
+        with path.open(encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][1], "104.16.0.2")
+
+    def test_empty_subset_writes_header_only(self) -> None:
+        """空子集只写表头，不抛异常（调用方应在 GUI 层拦截空选中）。"""
+        path = export_csv([])
+        with path.open(encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh))
+        self.assertEqual(rows, [list(CSV_HEADERS)])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

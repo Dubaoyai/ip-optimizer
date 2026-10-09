@@ -152,7 +152,73 @@ def main() -> int:
           ":80" in clip_port and "104.16.0.2" in clip_port,
           repr(clip_port[:70]))
 
-    # ==================== 4. 清空确认三选项 ====================
+    # ==================== 4. 导出选中行（2026-10-09 新增） ====================
+    # 与「复制选中行」成对：此前只有复制没有导出，用户挑几行只能全量导出再手工删。
+    # 这里用 monkeypatch 拦截 QFileDialog，避免弹真实保存框。
+    import csv as _csv
+    import tempfile
+    from pathlib import Path as _Path
+
+    from PySide6.QtWidgets import QFileDialog as _QFileDialog
+
+    table.clearSelection()
+    sm2 = table.selectionModel()
+    for row in (0, 2):
+        sm2.select(
+            table.model().index(row, 0),
+            QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+        )
+    app.processEvents()
+
+    _tmpdir = tempfile.TemporaryDirectory()
+    _save_target = _Path(_tmpdir.name) / "选中导出.csv"
+    _orig_get_save = _QFileDialog.getSaveFileName
+    _orig_info = QMessageBox.information
+    _orig_warning = QMessageBox.warning
+
+    try:
+        _QFileDialog.getSaveFileName = staticmethod(
+            lambda *a, **k: (str(_save_target), "CSV 文件 (*.csv)")
+        )
+        QMessageBox.information = staticmethod(lambda *a, **k: None)
+        QMessageBox.warning = staticmethod(lambda *a, **k: None)
+
+        # 4.1 选中 2 行 → 导出
+        win._on_export_selected()
+        check("⑭-导出 文件已生成", _save_target.exists(), str(_save_target))
+
+        if _save_target.exists():
+            with _save_target.open(encoding="utf-8-sig", newline="") as fh:
+                rows = list(_csv.reader(fh))
+            check("⑭-导出 行数 == 选中数 + 表头", len(rows) == 3, f"{len(rows)} 行")
+            check("⑭-导出 含选中 IP",
+                  {rows[1][1], rows[2][1]} == {"104.16.0.1", "104.16.0.3"},
+                  str([rows[1][1], rows[2][1]]))
+            check("⑭-导出 未夹带未选中行",
+                  "104.16.0.2" not in {rows[1][1], rows[2][1]},
+                  str(rows))
+
+        # 4.2 未选中任何行 → 不生成文件、不报错
+        _save_target.unlink(missing_ok=True)
+        table.clearSelection()
+        app.processEvents()
+        win._on_export_selected()
+        check("⑭-导出 空选中时不生成文件", not _save_target.exists())
+
+        # 4.3 按钮存在且已接入启用清单（防止「加了按钮永远是灰的」）
+        check("⑭-导出 按钮已创建", hasattr(win, "export_selected_button"))
+        check("⑭-导出 按钮在启用清单内",
+              win.export_selected_button.isEnabled() ==
+              win.copy_selected_button.isEnabled(),
+              f"export={win.export_selected_button.isEnabled()} "
+              f"copy={win.copy_selected_button.isEnabled()}")
+    finally:
+        _QFileDialog.getSaveFileName = _orig_get_save
+        QMessageBox.information = _orig_info
+        QMessageBox.warning = _orig_warning
+        _tmpdir.cleanup()
+
+    # ==================== 5. 清空确认三选项 ====================
     # 用 classmethod 包装后，测试只需 mock ClearChoiceDialog.ask 一个方法，
     # 不再触碰 QMessageBox.exec / clickedButton 等内部细节
     # （此前 36 处脆弱 mock 导致「一改 UI 就要改一批测试」）。

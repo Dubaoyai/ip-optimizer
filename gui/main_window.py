@@ -1021,6 +1021,10 @@ class MainWindow(QMainWindow):
             "复制选中行", "只复制你在表格里选中的行（按住 Ctrl/Shift 可多选）"
         )
         self.copy_selected_button.clicked.connect(self._on_copy_selected)
+        self.export_selected_button = widgets.ghost_button(
+            "导出选中行", "只把你在表格里选中的行导出为 CSV（会弹出保存位置选择）"
+        )
+        self.export_selected_button.clicked.connect(self._on_export_selected)
         self.copy_nodes_button = widgets.primary_button(
             "复制节点", "把优选 IP 套进模板生成节点链接，复制到剪贴板（可直接在 V2RayN 从剪贴板导入）"
         )
@@ -1029,7 +1033,10 @@ class MainWindow(QMainWindow):
             "导出节点", "把节点链接保存为 txt（会弹出保存位置选择）"
         )
         self.export_nodes_button.clicked.connect(self._on_export_nodes)
-        for button in (self.copy_selected_button, self.copy_nodes_button, self.export_nodes_button):
+        for button in (
+            self.copy_selected_button, self.export_selected_button,
+            self.copy_nodes_button, self.export_nodes_button,
+        ):
             button.setEnabled(False)  # 测速结束后才有数据
             node_layout.addWidget(button)
         node_layout.addStretch(1)
@@ -1270,6 +1277,11 @@ class MainWindow(QMainWindow):
 
         V1.4：想要含稳定性/最终评分的完整统计请用稳定性区域的
         【导出稳定性CSV】按钮（见 _on_export_stable_csv）。
+
+        2026-10-09 收敛：此前本方法**自己手写了一遍 CSV 字段与格式化**，
+        与 utils/export.export_csv 构成双真源（速度格式化 `/1048576:.3f`
+        vs `_format_speed_mbps`、状态列文案也不一致）。现统一委托给
+        export_csv，GUI 只负责「取数据 + 问路径」。
         """
         entries = self.result_table.rank_entries
         if not entries:
@@ -1285,37 +1297,65 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            # CSV 写入走 export_csv 的字段逻辑，落到用户选定路径
-            import csv as _csv
-
-            from utils.export import CSV_HEADERS
-
-            target = Path(path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("w", newline="", encoding="utf-8-sig") as fh:
-                writer = _csv.writer(fh)
-                writer.writerow(CSV_HEADERS)
-                for entry in entries:
-                    result = entry.result
-                    rank_text = str(entry.rank) if entry.rank > 0 else ""
-                    writer.writerow([
-                        rank_text,
-                        result.ip,
-                        result.port,
-                        result.latency if result.latency is not None else "",
-                        result.http_status if result.http_status is not None else "",
-                        result.http_latency if result.http_latency is not None else "",
-                        f"{(result.download_speed_bps or 0) / 1048576:.3f}"
-                        if result.download_speed_bps else "",
-                        entry.score if entry.score is not None else "",
-                        result.error or ("成功" if result.success else "失败"),
-                    ])
-        except (OSError, ImportError) as exc:
-            QMessageBox.warning(self, "导出失败", f"写入 CSV 失败：{exc}")
+            saved = export_csv(list(entries), target=Path(path))
+        except ExportError as exc:
+            QMessageBox.warning(self, "导出失败", str(exc))
             return
-        self._set_status(f"已导出 {len(entries)} 行结果到 {target}", "success")
-        QMessageBox.information(self, "导出成功", f"CSV 已保存到：\n{target}")
-        logger.info("用户导出 CSV：%s", target)
+        self._set_status(f"已导出 {len(entries)} 行结果到 {saved}", "success")
+        QMessageBox.information(self, "导出成功", f"CSV 已保存到：\n{saved}")
+        logger.info("用户导出 CSV：%s", saved)
+
+    def _on_export_selected(self) -> None:
+        """导出用户在表格里选中的行到 CSV。
+
+        与【复制选中行】成对：复制走剪贴板，本方法走文件。
+
+        此前只有「复制选中行」没有「导出选中行」—— 用户挑出几个 IP
+        想要文件时，只能全量导出再手工删。本方法补上这个缺口。
+
+        行为：
+        - 未选中任何行 → 提示并返回（不弹保存框，避免空操作）；
+        - 选中的 IP 在当前快照里找不到（例如表格显示的是原始结果而非排名）
+          → 用 IP 直接构造只含基础字段的行，保证「选了什么就导出什么」；
+        - 导出顺序与表格显示顺序一致。
+        """
+        ips = self.result_table.selected_ips()
+        if not ips:
+            QMessageBox.information(
+                self, "没有选中行",
+                "请先在下方表格里选中若干行（按住 Ctrl 或 Shift 可多选），再点【导出选中行】。",
+            )
+            return
+
+        wanted = set(ips)
+        # 优先用最终排名（含稳定性字段），其次用 V1.3 排名，保持与表格显示一致
+        entries = [
+            e for e in (self.result_table.final_entries or self.result_table.rank_entries)
+            if e.result.ip in wanted
+        ]
+        if not entries:
+            QMessageBox.warning(
+                self, "无法导出选中行",
+                "选中的行不在当前排名快照里，请先完成测速或改用【导出CSV】。",
+            )
+            return
+
+        default_path = str(
+            data_root() / "output" / f"IP优选_选中{len(entries)}条_{datetime.now():%Y%m%d_%H%M%S}.csv"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存选中的结果", default_path, "CSV 文件 (*.csv);;所有文件 (*.*)"
+        )
+        if not path:
+            return
+        try:
+            saved = export_csv(entries, target=Path(path), filename_prefix="IP优选_选中")
+        except ExportError as exc:
+            QMessageBox.warning(self, "导出失败", str(exc))
+            return
+        self._set_status(f"已导出选中的 {len(entries)} 行到 {saved}", "success")
+        QMessageBox.information(self, "导出成功", f"已导出 {len(entries)} 行到：\n{saved}")
+        logger.info("用户导出选中行：%s 行 → %s", len(entries), saved)
 
     # ------------------------------------------------------------------
     # V1.3：评分 / 排名 / 筛选 / 摘要
@@ -1386,7 +1426,8 @@ class MainWindow(QMainWindow):
         for button in (
             self.copy_top10_button, self.copy_top50_button, self.copy_top100_button,
             self.export_txt_button, self.export_csv_button,
-            self.copy_selected_button, self.copy_nodes_button, self.export_nodes_button,
+            self.copy_selected_button, self.export_selected_button,
+            self.copy_nodes_button, self.export_nodes_button,
         ):
             button.setEnabled(enabled)
 
