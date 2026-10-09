@@ -1021,3 +1021,86 @@ def apply_theme(app, mode: str = DEFAULT_MODE) -> str:
             pass
 
     return effective
+
+
+# ======================================================================
+# 八、窗口标题栏深色化（Windows 原生）
+# ======================================================================
+#
+# ## 为什么需要这个模块
+#
+# 窗口最顶部的标题栏（带最小化/最大化/关闭按钮那一条）**由 Windows 系统绘制**，
+# Qt 的样式表（QSS）**完全管不到它** —— 所以深色主题下它会保持系统默认的
+# 白色/浅色，与黑灰面板形成刺眼的色差。
+#
+# ## 做法
+#
+# Windows 10 1809（build 17763）起提供 DWM 属性
+# `DWMWA_USE_IMMERSIVE_DARK_MODE`，设为 1 即让系统把该窗口标题栏绘成深色。
+# 纯 ctypes 调用，**不引入任何第三方依赖**（打包体积零增长）。
+#
+# ## 已知限制（诚实登记，不隐瞒）
+#
+# 1. **只支持 Windows**：其他平台直接跳过（本函数是 no-op），不会报错；
+# 2. **是「系统深色」而非面板精确色值**：Windows 只提供「深/浅」二选一，
+#    无法指定 `#181818` 这样的具体颜色。视觉上与面板同属深色系，但非逐像素一致；
+# 3. **需要 Windows 10 1809+**：更早的系统上调用会静默失败（已做 try 保护）。
+
+# DWM 属性号：Windows 10 build 18985 起用 20，更早的 1809~18984 用 19
+_DWMWA_USE_IMMERSIVE_DARK_MODE_NEW = 20
+_DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
+
+
+def _is_dark_effective() -> bool:
+    """当前生效主题是否为深色（"system" 模式按其解析结果判定）。"""
+    return resolve_mode(_current_mode) == "dark"
+
+
+def apply_dark_titlebar(window) -> bool:
+    """把窗口标题栏设为深色（或浅色），与当前主题保持一致。
+
+    调用时机：**窗口已创建且已 show() 之后**（窗口句柄必须已存在）。
+    主题切换后需要再次调用，否则标题栏颜色不会跟着变。
+
+    Args:
+        window: 任意 QWidget（通常是 QMainWindow）实例。
+
+    Returns:
+        True 表示已成功应用；False 表示当前平台不支持或调用失败
+        （**不抛异常** —— 标题栏样式属于锦上添花，失败不应影响程序运行）。
+    """
+    if sys.platform != "win32":
+        return False  # 非 Windows：直接跳过
+
+    try:
+        import ctypes
+
+        # 取窗口句柄。PySide6 的 winId() 返回 WId（整数）
+        hwnd = int(window.winId())
+        if not hwnd:
+            return False
+
+        value = ctypes.c_int(1 if _is_dark_effective() else 0)
+        dwm = ctypes.windll.dwmapi
+
+        # 新属性号（build 18985+）优先，失败时回退旧号（1809~18984）
+        for attr in (_DWMWA_USE_IMMERSIVE_DARK_MODE_NEW,
+                     _DWMWA_USE_IMMERSIVE_DARK_MODE_OLD):
+            result = dwm.DwmSetWindowAttribute(
+                ctypes.c_void_p(hwnd),
+                ctypes.c_uint(attr),
+                ctypes.byref(value),
+                ctypes.sizeof(value),
+            )
+            if result == 0:      # S_OK
+                # 属性设置后需要触发一次重绘，否则个别系统上要等窗口重绘才生效
+                try:
+                    window.setWindowTitle(window.windowTitle())
+                except Exception:
+                    pass
+                return True
+
+        return False
+    except Exception:
+        # 标题栏美化失败绝不应影响主流程
+        return False

@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, QRect, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -68,7 +68,7 @@ from core.scanner import (
 )
 from core.stability import StabilityData  # V1.4：稳定性复测统计数据结构
 from core.tcp_tester import TestResult
-from gui import theme, widgets
+from gui import theme, titlebar, widgets
 from gui.ip_panel import IPPanel
 from gui.sample_page import SamplePage
 from gui.result_table import ResultTable
@@ -88,7 +88,7 @@ from utils.paths import data_root
 
 logger: logging.Logger = get_logger()
 
-APP_TITLE = "数码解码 IP 优选器 V1.4"
+APP_TITLE = "IP优化器"
 
 # 结果批量刷新间隔（毫秒）：测速时先把结果攒起来，定时批量写入表格，界面更流畅
 RESULT_FLUSH_INTERVAL_MS = 300
@@ -125,6 +125,22 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_TITLE)
         self.resize(1080, 860)
         self.setMinimumSize(900, 660)
+
+        # ---- 无边框窗口（V1.5：自绘标题栏的前提）----
+        # 去掉 Windows 原生标题栏后，改由 gui/titlebar.py 自绘一条，
+        # 使其颜色能与面板**像素级同色**（系统标题栏无法指定 #181818）。
+        # 保留 Window 标志 ⇒ 仍是普通顶层窗口：任务栏显示、Alt+Tab、
+        # Win+方向键等系统行为不受影响。
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        # 记录「最大化前的窗口几何」，供还原时恢复
+        self._normal_geometry: Optional[QRect] = None
+
+        # ---- 消除启动白闪（2026-10-09 用户反馈「刚弹出来是白色主题」）----
+        # 问题：QSS 是异步生效的。窗口在 show() 的第一帧会先按 Windows 默认
+        #       画成白色，之后样式表才覆盖上来 —— 用户看到一次刺眼的白闪。
+        # 做法：在构造期就直接把窗口自身的调色板底色设成当前主题的 BG_PRIMARY，
+        #       使第一帧就是深色。QSS 仍照常生效，两者不冲突。
+        self._apply_window_base_color()
 
         # 运行时数据
         self._valid_entries: List[IPEntry] = []           # 导入并校验通过、可测速的 IP
@@ -167,7 +183,21 @@ class MainWindow(QMainWindow):
         - 视图切换只是把面板加进/移出布局，控件对象始终存在，数据不丢。
         """
         central = QWidget()
-        root = QHBoxLayout(central)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ---------------- 自绘标题栏（V1.5） ----------------
+        # 系统标题栏由 Windows 绘制，QSS 管不到、也无法指定 #181818；
+        # 故改为无边框窗口 + 自绘标题条，使其与面板**像素级同色**。
+        self.title_bar = titlebar.CustomTitleBar(APP_TITLE)
+        self.title_bar.minimize_requested.connect(self.showMinimized)
+        self.title_bar.maximize_requested.connect(self._toggle_maximized)
+        self.title_bar.close_requested.connect(self.close)
+        outer.addWidget(self.title_bar)
+
+        body = QWidget()
+        root = QHBoxLayout(body)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
@@ -196,6 +226,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(scroll, 1)
 
         root.addWidget(right, 1)
+        outer.addWidget(body, 1)
         self.setCentralWidget(central)
 
         # 构建视图页面容器（顺序与侧边栏导航一致：工作台 → 稳定性复测 → 测试结果 → 抽样测速）
@@ -245,7 +276,7 @@ class MainWindow(QMainWindow):
 
         text_box = QVBoxLayout()
         text_box.setSpacing(2)
-        title = QLabel("IP 优选器")
+        title = QLabel("IP优化器")
         title.setObjectName("BrandTitle")
         sub = QLabel("本地测速 · 优选")
         sub.setObjectName("BrandSub")
@@ -461,7 +492,95 @@ class MainWindow(QMainWindow):
         # 主题切换后刷新表格单元格颜色（表格用 QColor 上色，不随 QSS 自动更新）
         if hasattr(self, "result_table"):
             self.result_table.reapply_colors()
+
+        # 窗口自身底色跟着切（否则从深色切浅色时，窗口底色会残留旧值）
+        self._apply_window_base_color()
+
+        # 自绘标题栏跟着切（它用 QSS 上色，但样式表是在控件上单独设的）
+        if hasattr(self, "title_bar"):
+            self.title_bar.refresh_style()
+
+        # 同步窗口标题栏（Windows 系统绘制，QSS 管不到，必须走原生 API）
+        # 窗口尚未创建句柄时（如构造期）会安全返回 False，由 showEvent 兜底
+        self._sync_titlebar_theme()
         return effective
+
+    def _toggle_maximized(self) -> None:
+        """最大化 / 还原窗口（自绘标题栏的按钮与双击都走这里）。
+
+        ⚠️ **不能直接用 `showMaximized()`** —— 无边框窗口下 Qt 会按
+        `screen.geometry()`（含任务栏区域）最大化，导致**窗口盖住任务栏**。
+        正确做法是用 `availableGeometry()`（已扣除任务栏）手动设置几何。
+        """
+        if self.isMaximized():
+            self.showNormal()
+            # 还原到最大化前的尺寸与位置
+            if self._normal_geometry is not None:
+                self.setGeometry(self._normal_geometry)
+        else:
+            self._normal_geometry = self.geometry()
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen is not None:
+                self.setGeometry(screen.availableGeometry())
+            else:
+                self.showMaximized()
+        self._sync_maximize_button()
+
+    def _sync_maximize_button(self) -> None:
+        """同步最大化按钮的图标与提示（含系统触发的最大化）。"""
+        if hasattr(self, "title_bar"):
+            self.title_bar.set_maximized(self.isMaximized())
+
+    def changeEvent(self, event) -> None:  # noqa: N802（Qt 要求的驼峰命名）
+        """窗口状态变化时同步最大化按钮（如系统贴边触发的最大化）。"""
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._sync_maximize_button()
+
+    def _sync_titlebar_theme(self) -> None:
+        """让窗口标题栏颜色跟随当前主题（深色主题 ⇒ 深色标题栏）。
+
+        背景：标题栏由 Windows 系统绘制，Qt 样式表**管不到**，
+        深色主题下它会保持系统默认的白色，与黑灰面板形成刺眼色差。
+
+        本方法只做「调用 + 记日志」，具体平台判断与异常保护都在
+        `theme.apply_dark_titlebar` 内（非 Windows 平台自动跳过）。
+        """
+        ok = theme.apply_dark_titlebar(self)
+        if ok and not getattr(self, "_titlebar_logged", False):
+            # 只在首次成功时记一次日志，避免主题反复切换时刷屏
+            self._titlebar_logged = True
+            logger.info("已应用深色标题栏（Windows 原生 DWM）")
+
+    def _apply_window_base_color(self) -> None:
+        """把窗口自身的底色设成当前主题背景色，消除启动白闪。
+
+        与 QSS 的分工：
+        - QSS（`theme.build_qss`）负责**所有子控件**的样式，异步生效；
+        - 本方法只设**顶层窗口**的调色板底色，构造期即生效 ⇒ show() 的第一帧
+          就是深色，不再闪白。
+
+        两处取的是同一个色值（`theme.color("BG_PRIMARY")`），不存在双真源。
+        """
+        try:
+            pal = self.palette()
+            pal.setColor(self.backgroundRole(), theme.qcolor("BG_PRIMARY"))
+            self.setPalette(pal)
+            # 让窗口用调色板底色填充背景（QMainWindow 默认不一定填）
+            self.setAutoFillBackground(True)
+        except Exception:
+            # 底色是纯观感优化，失败不应影响启动
+            pass
+
+    def showEvent(self, event) -> None:  # noqa: N802（Qt 要求的驼峰命名）
+        """窗口首次显示时同步标题栏 —— 此时窗口句柄才真正存在。
+
+        为什么必须在这里补一次：`apply_theme_mode` 在启动流程中会被调用，
+        但那个时刻窗口还没 show()，`winId()` 拿不到有效的 Windows 句柄，
+        导致标题栏深色化失败（表现为「启动后标题栏仍是白色」）。
+        """
+        super().showEvent(event)
+        self._sync_titlebar_theme()
 
     # ------------------------------------------------------------------
     # 统计卡片行（参照《API总代理》的 stats-grid）

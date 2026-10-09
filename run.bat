@@ -1,5 +1,5 @@
 @echo off
-rem 双击本文件即可启动《数码解码 IP 优选器 V1.4》
+rem 双击本文件即可启动《IP优化器》
 chcp 65001 >nul
 cd /d "%~dp0"
 set PYTHONIOENCODING=utf-8
