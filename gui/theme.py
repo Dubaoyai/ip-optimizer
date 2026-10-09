@@ -140,6 +140,7 @@ LIGHT: Dict[str, str] = {
 RADIUS = 14                 # 大圆角（卡片 / 面板）
 RADIUS_SM = 8               # 小圆角（按钮 / 输入框）
 SIDEBAR_WIDTH = 240         # 侧边栏宽 —— .sidebar width: 240px
+SIDEBAR_ANIM_MS = 180       # 侧边栏展开/收起动画时长（毫秒）；0 = 关闭动画
 BRAND_ICON = 56             # 品牌图标边长
 BRAND_RADIUS = 14           # 品牌图标圆角
 PAD_H = 22                  # 面板横向内边距
@@ -556,6 +557,22 @@ QPushButton#NavButton:checked {{
 QWidget#TopBar {{
     background-color: {c('BG_PRIMARY')};
     border-bottom: 1px solid {c('BORDER')};
+}}
+/* 侧边栏收缩按钮（V1.5）：低调的幽灵按钮，不抢页面标题的视觉重心 */
+QPushButton#SidebarToggle {{
+    background-color: transparent;
+    color: {c('TEXT_MUTED')};
+    border: none;
+    border-radius: {RADIUS_SM}px;
+    font-size: 12px;
+    padding: 0px;
+}}
+QPushButton#SidebarToggle:hover {{
+    background-color: {c('BG_BUTTON_HOVER')};
+    color: {c('TEXT_PRIMARY')};
+}}
+QPushButton#SidebarToggle:pressed {{
+    background-color: {c('BG_BUTTON_PRESSED')};
 }}
 #PageTitle {{
     color: {c('TEXT_PRIMARY')};

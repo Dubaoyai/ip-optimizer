@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QRect, Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QRect, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -252,10 +253,30 @@ class MainWindow(QMainWindow):
     # 左侧边栏
     # ------------------------------------------------------------------
     def _build_sidebar(self) -> QWidget:
-        """构建左侧边栏：品牌区 + 导航 + 底部状态。"""
+        """构建左侧边栏：品牌区 + 导航 + 底部状态。
+
+        V1.5：宽度由 `setFixedWidth` 改为**可变宽度 + 动画**，支持展开/收起。
+        （此前写死 240px，无法收缩 —— 用户要求「可以收缩」）
+        """
         side = QWidget()
         side.setObjectName("Sidebar")
-        side.setFixedWidth(theme.SIDEBAR_WIDTH)
+        # 用 min/max 成对设置而非 setFixedWidth：收缩动画需要动态改宽度。
+        # ⚠️ 必须**同时**设 minimumWidth 与 maximumWidth：
+        #    只设 max 时，布局会按内容自然宽度收缩（实测只有 207px，
+        #    达不到设计的 240px）—— 因为侧边栏内容的 sizeHint 小于 240。
+        side.setMinimumWidth(theme.SIDEBAR_WIDTH)
+        side.setMaximumWidth(theme.SIDEBAR_WIDTH)
+        side.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self._sidebar = side
+        self._sidebar_width = theme.SIDEBAR_WIDTH
+        self._sidebar_expanded = True
+        # 宽度动画：**两个属性一起动**（min + max），否则展开时会卡在内容自然宽度
+        self._sidebar_anim = QPropertyAnimation(side, b"maximumWidth", self)
+        self._sidebar_anim.setDuration(theme.SIDEBAR_ANIM_MS)
+        self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._sidebar_anim_min = QPropertyAnimation(side, b"minimumWidth", self)
+        self._sidebar_anim_min.setDuration(theme.SIDEBAR_ANIM_MS)
+        self._sidebar_anim_min.setEasingCurve(QEasingCurve.Type.InOutCubic)
         layout = QVBoxLayout(side)
         # 对齐《API总代理》.sidebar：padding 20px 14px
         layout.setContentsMargins(14, 20, 14, 14)
@@ -317,6 +338,58 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.sidebar_status)
 
         return side
+
+    # ------------------------------------------------------------------
+    # 侧边栏展开 / 收起（V1.5）
+    # ------------------------------------------------------------------
+    def toggle_sidebar(self) -> None:
+        """切换侧边栏展开/收起（带平滑动画）。
+
+        设计说明：
+        - 切换按钮放在**顶栏左侧**而非侧边栏内 —— 侧边栏收起后就看不见了，
+          按钮若放在里面，收起后将**无法再次展开**（这是自动隐藏类 UI 的经典坑）。
+        - 只改 `maximumWidth` 而非 `setVisible(False)`：后者会让侧边栏瞬间消失
+          且布局跳动；前者可平滑过渡，且布局始终有稳定的锚点。
+        """
+        self.set_sidebar_expanded(not self._sidebar_expanded)
+
+    def set_sidebar_expanded(self, expanded: bool) -> None:
+        """把侧边栏设为展开或收起状态（可被外部调用，供测试与状态恢复）。
+
+        Args:
+            expanded: True = 展开（宽 240px）；False = 收起（宽 0）。
+        """
+        self._sidebar_expanded = expanded
+        target = theme.SIDEBAR_WIDTH if expanded else 0
+
+        if theme.SIDEBAR_ANIM_MS <= 0:
+            # 动画时长配 0 时直接落位（供无动画环境/测试使用）
+            self._sidebar.setMinimumWidth(target)
+            self._sidebar.setMaximumWidth(target)
+        else:
+            # ⚠️ min 与 max 必须**同步动画**：
+            # 只动 max 时，min 仍锁在 240 ⇒ 收起时宽度不变（min 撑住）；
+            # 只动 min 时，max 仍是 240 ⇒ 展开时宽度卡在内容自然宽度（实测 207）。
+            for anim, prop in ((self._sidebar_anim, "maximumWidth"),
+                               (self._sidebar_anim_min, "minimumWidth")):
+                anim.stop()
+                cur = (self._sidebar.maximumWidth() if prop == "maximumWidth"
+                       else self._sidebar.minimumWidth())
+                anim.setStartValue(cur)
+                anim.setEndValue(target)
+                anim.start()
+
+        # 同步按钮图标与提示（▶ 表示可展开 / ◀ 表示可收起）
+        if hasattr(self, "sidebar_toggle_button"):
+            self.sidebar_toggle_button.setText("▶" if not expanded else "◀")
+            self.sidebar_toggle_button.setToolTip(
+                "展开左侧栏" if not expanded else "收起左侧栏"
+            )
+        logger.info("侧边栏%s", "展开" if expanded else "收起")
+
+    def _on_toggle_sidebar(self) -> None:
+        """顶栏按钮点击：切换侧边栏。"""
+        self.toggle_sidebar()
 
     def _set_status(self, text: str, tone: str = "") -> None:
         """统一更新底部状态栏、侧边栏状态与顶栏徽标（三处保持一致）。
@@ -417,6 +490,17 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(20, 10, 20, 10)
         layout.setSpacing(10)
+
+        # ---- 侧边栏收缩按钮（V1.5，放在顶栏而非侧边栏内） ----
+        # 为什么放这里：侧边栏收起后自身不可见，按钮若在侧边栏内将无法再展开。
+        self.sidebar_toggle_button = QPushButton("◀")
+        self.sidebar_toggle_button.setObjectName("SidebarToggle")
+        self.sidebar_toggle_button.setFixedSize(28, 28)
+        self.sidebar_toggle_button.setToolTip("收起左侧栏")
+        self.sidebar_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sidebar_toggle_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.sidebar_toggle_button.clicked.connect(self._on_toggle_sidebar)
+        layout.addWidget(self.sidebar_toggle_button)
 
         text_box = QVBoxLayout()
         text_box.setSpacing(2)

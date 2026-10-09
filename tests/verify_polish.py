@@ -281,6 +281,47 @@ def main() -> int:
         ClearChoiceDialog.ask = _orig_ask
     check("⑳ 无数据时不打扰用户（不弹窗）", asked["n"] == 0, f"弹窗 {asked['n']} 次")
 
+    # ==================== 6. 侧边栏展开 / 收起（V1.5） ====================
+    # 用户需求：「左侧栏可以收缩」。
+    # 关键断言：min 与 max 必须同步变化 —— 只改一个会导致
+    #   只改 max ⇒ 收起时 min 锁住宽度（收不动）；
+    #   只改 min ⇒ 展开时卡在内容自然宽度（实测只有 207px，达不到 240）。
+    _orig_anim = theme.SIDEBAR_ANIM_MS
+    theme.SIDEBAR_ANIM_MS = 0      # 关动画，便于同步断言
+    try:
+        side = win._sidebar
+        toggle = win.sidebar_toggle_button
+
+        # 6.1 初始应为展开
+        win.set_sidebar_expanded(True)
+        app.processEvents()
+        check("㉑ 侧边栏初始展开宽度正确",
+              side.width() == theme.SIDEBAR_WIDTH,
+              f"{side.width()} (期望 {theme.SIDEBAR_WIDTH})")
+
+        # 6.2 点击按钮 → 收起
+        toggle.click()
+        app.processEvents()
+        check("㉒ 点击按钮后侧边栏收起", side.width() == 0, f"{side.width()}")
+        check("㉓ 收起后按钮变为展开图标", toggle.text() == "▶", repr(toggle.text()))
+
+        # 6.3 按钮必须仍在可见区（否则收起后无法再展开 —— 经典坑）
+        check("㉔ 收起后切换按钮仍可见（能再展开）", toggle.isVisible())
+
+        # 6.4 再点 → 展开，且宽度必须精确回到 240（防「卡在内容自然宽度」）
+        toggle.click()
+        app.processEvents()
+        check("㉕ 再次点击后完全展开（min/max 同步）",
+              side.width() == theme.SIDEBAR_WIDTH,
+              f"{side.width()} (期望 {theme.SIDEBAR_WIDTH})")
+
+        # 6.5 展开标志与按钮状态一致
+        check("㉖ 展开标志与按钮文字一致",
+              win._sidebar_expanded and toggle.text() == "◀",
+              f"expanded={win._sidebar_expanded} text={toggle.text()!r}")
+    finally:
+        theme.SIDEBAR_ANIM_MS = _orig_anim
+
     # ---------- 汇总 ----------
     print()
     passed = sum(1 for _, ok, _ in results if ok)
