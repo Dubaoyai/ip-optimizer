@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -42,6 +43,37 @@ def _install_exception_hook(logger) -> None:
     sys.excepthook = handle_exception
 
 
+def _apply_app_icon(app: QApplication, logger) -> None:
+    """设置程序图标（任务栏 / 窗口 / Alt+Tab 共用）。
+
+    图标文件 `assets/app.ico` 由中枢「图标工坊」skill 生成（矢量重绘，
+    保证 16px 下的可辨识性）。
+
+    路径解析要同时适配两种运行方式：
+    - 源码运行：`main.py` 所在目录（项目根）下的 assets/；
+    - PyInstaller 打包：资源被解包到临时目录，须从 `sys._MEIPASS` 取。
+
+    ⚠️ 图标缺失**不应影响程序启动** —— 找不到就记一条日志跳过。
+
+    Args:
+        app: QApplication 实例。
+        logger: 日志器。
+    """
+    try:
+        from PySide6.QtGui import QIcon
+
+        base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        icon_path = base / "assets" / "app.ico"
+        if icon_path.exists():
+            app.setWindowIcon(QIcon(str(icon_path)))
+            logger.info("程序图标已加载：%s", icon_path)
+        else:
+            logger.info("未找到程序图标（%s），使用系统默认图标", icon_path)
+    except Exception as exc:  # noqa: BLE001
+        # 图标是纯观感项，失败不应阻断启动
+        logger.warning("加载程序图标失败：%s", exc)
+
+
 def main() -> int:
     """程序主函数。"""
     # 确保 logs、output 目录存在
@@ -53,6 +85,9 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
     _install_exception_hook(logger)
+
+    # 程序图标：任务栏、窗口标题栏、Alt+Tab 都用它
+    _apply_app_icon(app, logger)
 
     # 应用主题：**每次启动固定用深色**（产品要求）。
     # 早期版本会把用户上次的选择写盘并在下次启动沿用，导致

@@ -98,7 +98,10 @@ a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    # 资源文件：图标需要打进去，运行时从 sys._MEIPASS/assets 读取。
+    # ⚠️ 只打 .ico —— 不要用 datas=[("assets", "assets")] 把整个目录塞进来，
+    #    那样会把多版候选图（几百 KB × N）一并打进 exe，白白增大体积。
+    datas=[("assets/app.ico", "assets")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -221,5 +224,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,           # 暂无 .ico 资源（assets/ 为空）；有图标后可填 "assets/app.ico"
+    icon="assets/app.ico",  # 程序图标（由中枢「图标工坊」skill 生成，矢量重绘保证 16px 可辨）
 )
